@@ -718,7 +718,12 @@ function openItem(it){
   const info = `<div class="info"><div><h2>${esc(it.title)}</h2><small>${esc(F.name)} · ${KIND[it.type]} · ${fmtDate(it.t)}</small></div><small>${fmtSize(it.size)}${it.dur ? ' · ' + esc(it.dur) : ''}</small></div>`;
   let b;
   if (it.type === 'image') b = `<div class="media"><img src="${it.src}" alt=""></div>${info}`;
-  else if (it.type === 'video') b = it.url ? `<div class="media"><video src="${it.vsrc || it.url}" ${it.poster ? `poster="${it.poster}"` : ''} controls autoplay playsinline></video></div>` : `<div class="media"><img src="${it.src}" alt=""></div>${info}`;
+  else if (it.type === 'video'){
+    const vs = it.vsrc || it.url;
+    if (vs) b = `<div class="media"><video id="pvVid" src="${vs}" ${it.poster ? `poster="${it.poster}"` : ''} controls autoplay playsinline></video></div>`;
+    else if (it.src) b = `<div class="media"><img src="${it.src}" alt=""></div>${info}`;
+    else b = missingVideo(it);
+  }
   else if (it.type === 'link') b = `<div class="linkview"><div class="card" style="background:${linkBg(it)}"><b>${esc(domainOf(it.link))}</b><a href="${esc(it.link)}" target="_blank" rel="noopener">${esc(it.link)}</a></div>
       <a class="btn w open" href="${esc(it.link)}" target="_blank" rel="noopener">Open link ↗</a>
       <input id="lT" placeholder="Title" value="${esc(it.title)}"><textarea id="lB" placeholder="Notes about this link…">${esc(it.body || '')}</textarea></div>`;
@@ -742,10 +747,36 @@ function openItem(it){
     const lb = $('#lB'), fitL = () => { lb.style.height = 'auto'; lb.style.height = Math.max(140, lb.scrollHeight + 6) + 'px'; };
     lb.oninput = e => { it.body = e.target.value; Persist.dirty(); fitL(); }; fitL();
   }
+  if (it.type === 'video'){
+    wireReAdd(it);
+    const v = document.getElementById('pvVid');
+    if (v) v.onerror = () => { $('#pvbody').innerHTML = missingVideo(it); wireReAdd(it); };
+  }
   $('#pBack').onclick = closeItem;
   $('#pStar').onclick = () => { it.star = !it.star; openItem(it); renderSide(); };
   $('#pMove').onchange = e => { Sorter.learn(it, it.folder, e.target.value, 'moved'); it.folder = e.target.value; toast(`Moved to ${folders.find(f => f.id === it.folder).name}`); render(); };
   $('#pDel').onclick = () => { if (it.url) URL.revokeObjectURL(it.url); items = items.filter(x => x !== it); open = null; closeItem(); toast('Deleted'); };
+}
+// a video whose file wasn't kept (older versions dropped videos over ~80 MB) → let you re-add it in place
+function missingVideo(it){
+  return `<div class="media"><div style="position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px">
+    <div><div style="font-size:16px;color:#fff;font-weight:600;margin-bottom:8px">This video's file wasn't saved</div>
+    <div style="color:var(--muted);font-size:13px;line-height:1.6;max-width:380px;margin:0 auto 16px">It was added in an older version of Stash that couldn't keep big videos. Re-add the same file and it'll stay in this spot, title and folder included.</div>
+    <button class="btn w" id="reAdd" style="margin:0 auto">Re-add video…</button></div></div></div>`;
+}
+function wireReAdd(it){
+  const b = document.getElementById('reAdd'); if (!b) return;
+  b.onclick = () => {
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'video/*';
+    inp.onchange = async () => {
+      const f = inp.files[0]; if (!f) return;
+      b.textContent = 'Adding…'; b.disabled = true;
+      const feat = await Sorter.read(f), fresh = makeItem(f, feat);
+      Object.assign(it, {url: fresh.url, vsrc: fresh.vsrc, poster: fresh.poster || it.poster, dur: fresh.dur || it.dur, size: f.size, mime: f.type, fname: f.name});
+      Persist.dirty(); openItem(it); renderGrid?.();
+    };
+    inp.click();
+  };
 }
 function closeItem(){
   if (open && open.type === 'note' && !open.title && !open.body) items = items.filter(x => x !== open);

@@ -1,6 +1,6 @@
 {
-  "version": "1.5.1",
-  "notes": "Videos play reliably; long notes show in full",
+  "version": "1.5.2",
+  "notes": "Re-add videos that older versions didn’t keep",
   "files": [
     "index.html",
     "quick.html",
