@@ -249,6 +249,11 @@ app.whenReady().then(() => {
     return r;
   });
   ipcMain.handle('ai:creds', () => AI.creds());
+  // ---- uploaded videos/docs live as real files on disk ----
+  const filesDir = () => { const d = path.join(app.getPath('userData'), 'files'); fs.mkdirSync(d, { recursive: true }); return d; };
+  const destFor = name => path.join(filesDir(), Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + '-' + String(name || 'file').replace(/[^\w.\- ]+/g, '_').slice(-80));
+  ipcMain.handle('files:copy', (e, src, name) => { const d = destFor(name || path.basename(src)); fs.copyFileSync(src, d); return require('url').pathToFileURL(d).href; });
+  ipcMain.handle('files:write', (e, name, bytes) => { const d = destFor(name); fs.writeFileSync(d, Buffer.from(bytes)); return require('url').pathToFileURL(d).href; });
   ipcMain.handle('ai:status', () => AI.status());
   ipcMain.handle('ai:setupLocal', async () => {
     const send = p => [isl, win, pop].forEach(w => { try { if (w && !w.isDestroyed()) w.webContents.send('ai:setup', p); } catch (e) {} });

@@ -121,7 +121,7 @@ input,textarea{font:inherit;color:inherit}
 .info small{display:block;font-size:11px;color:var(--muted);margin-top:3px}
 .editor{max-width:620px;margin:0 auto;padding:28px 24px}
 .editor input{width:100%;background:none;border:0;outline:0;font-size:28px;font-weight:600;letter-spacing:-.03em;margin-bottom:14px}
-.editor textarea{width:100%;min-height:340px;background:none;border:0;outline:0;resize:none;font-size:14px;line-height:1.75;color:rgba(255,255,255,.82)}
+.editor textarea{width:100%;min-height:340px;overflow:hidden;background:none;border:0;outline:0;resize:none;font-size:14px;line-height:1.75;color:rgba(255,255,255,.82)}
 .editor input::placeholder,.editor textarea::placeholder{color:var(--faint)}
 .docpage{max-width:620px;margin:24px auto;background:#f6f4ef;color:#141414;border-radius:8px;padding:40px 44px;min-height:420px}
 .docpage h2{font-size:22px;letter-spacing:-.02em}
@@ -301,7 +301,7 @@ input,textarea{font:inherit;color:inherit}
 .linkview .card b{font-size:22px;letter-spacing:-.02em;color:#fff}
 .linkview .card a{font-size:12px;color:rgba(255,255,255,.8);word-break:break-all}
 .linkview input,.linkview textarea{background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:9px;outline:0;padding:10px 12px;font-size:13.5px;color:#fff}
-.linkview textarea{min-height:140px;resize:vertical;line-height:1.6}
+.linkview textarea{min-height:140px;resize:none;overflow:hidden;line-height:1.6}
 .linkview .open{align-self:flex-start}
 
 /* ---------- Smart Sort tray ---------- */
@@ -732,12 +732,15 @@ function openItem(it){
   if (it.type === 'note'){
     const t = $('#nT'), x = $('#nB');
     t.oninput = () => { it.title = t.value; it.t = Date.now(); Persist.dirty(); };
-    x.oninput = () => { it.body = x.value; it.t = Date.now(); Persist.dirty(); };
-    setTimeout(() => (it.title ? x : t).focus(), 350);
+    const fit = () => { x.style.height = 'auto'; x.style.height = Math.max(340, x.scrollHeight + 8) + 'px'; };
+    x.oninput = () => { it.body = x.value; it.t = Date.now(); Persist.dirty(); fit(); };
+    fit(); requestAnimationFrame(fit);
+    setTimeout(() => { fit(); (it.title ? x : t).focus({preventScroll: true}); }, 350);
   }
   if (it.type === 'link'){
     $('#lT').oninput = e => { it.title = e.target.value; Persist.dirty(); };
-    $('#lB').oninput = e => { it.body = e.target.value; Persist.dirty(); };
+    const lb = $('#lB'), fitL = () => { lb.style.height = 'auto'; lb.style.height = Math.max(140, lb.scrollHeight + 6) + 'px'; };
+    lb.oninput = e => { it.body = e.target.value; Persist.dirty(); fitL(); }; fitL();
   }
   $('#pBack').onclick = closeItem;
   $('#pStar').onclick = () => { it.star = !it.star; openItem(it); renderSide(); };
@@ -1310,10 +1313,13 @@ const Sorter = (() => {
       else if (ext === 'docx') text = await docxText(f);
       else if (type === 'video') dur = await videoDur(f);
     } catch (e) { /* unreadable → sort by name and type only */ }
-    let full = null, thumb = null, poster = null;
+    let full = null, thumb = null, poster = null, stored = null;
+    // Mac app: videos and documents are copied into ~/Library/Application Support/Stash/files
+    try { if (window.stashNative?.storeFile && type !== 'image') stored = await window.stashNative.storeFile(f); } catch (e) { stored = null; }
     try {
       if (type === 'image'){ full = await fileToDataURL(f); thumb = await imageThumb(full).catch(() => full); }
-      else if (type === 'video'){ if (f.size < 80e6) full = await fileToDataURL(f); poster = await videoPoster(full || URL.createObjectURL(f)); }
+      else if (type === 'video'){ full = stored || (f.size < 80e6 ? await fileToDataURL(f) : null); poster = await videoPoster(full || URL.createObjectURL(f)); }
+      else if (stored) full = stored;
       else if (window.stashNative && f.size < 60e6) full = await fileToDataURL(f);   // Mac app: keep the file so it's still there next launch
     } catch (e) {}
     text = text.replace(/\s+\n/g, '\n').slice(0, 200000);
@@ -1757,7 +1763,20 @@ const Persist = (() => {
     try {
       const d = JSON.parse(json); if (!d || !Array.isArray(d.items)) return;
       folders = d.folders; items = d.items; Sorter.setLessons(d.lessons);
-      items.forEach(it => { const src = it.data || (it.vsrc && it.vsrc.startsWith('data:') ? it.vsrc : null) || (it.type === 'image' && it.fname ? it.src : null); if (src) it.url = toBlobURL(src); });
+      items.forEach(it => {
+        const src = it.data || (it.vsrc && /^(data|file):/.test(it.vsrc) ? it.vsrc : null) || (it.type === 'image' && it.fname ? it.src : null);
+        if (src) it.url = src.startsWith('file:') ? src : toBlobURL(src);
+      });
+      // older uploads kept videos inside the save file — move them to real files so they play reliably
+      if (window.stashNative?.storeFile) setTimeout(async () => {
+        for (const it of items.filter(i => i.type === 'video' && i.vsrc && i.vsrc.startsWith('data:'))){
+          try {
+            const blob = await (await fetch(it.vsrc)).blob();
+            const url = await window.stashNative.storeFile(new File([blob], it.fname || (it.title + '.mp4'), {type: blob.type || it.mime || 'video/mp4'}));
+            if (url){ it.vsrc = it.url = url; if (!it.poster) it.poster = await videoPoster(url); dirty = true; render(); }
+          } catch (e) {}
+        }
+      }, 1500);
     } catch (e) { console.warn('Stash: could not restore saved data', e); }
   }
   if (N){ timer = setInterval(save, 1500); addEventListener('beforeunload', () => { dirty = true; save(); }); }

@@ -1,6 +1,6 @@
 {
-  "version": "1.5.0",
-  "notes": "Stash now runs on Claude",
+  "version": "1.5.1",
+  "notes": "Videos play reliably; long notes show in full",
   "files": [
     "index.html",
     "quick.html",

@@ -41,6 +41,12 @@ contextBridge.exposeInMainWorld('stashNative', {
   aiCreds: () => ipcRenderer.invoke('ai:creds'),
   onAICreds: cb => ipcRenderer.on('ai-creds', (e, c) => cb(c)),
   aiStatus: () => ipcRenderer.invoke('ai:status'),
+  // copy an uploaded file into Stash's own files folder → returns a file:// URL
+  storeFile: async file => {
+    let p = ''; try { p = webUtils.getPathForFile(file); } catch (e) {}
+    if (p) return ipcRenderer.invoke('files:copy', p, file.name);
+    return ipcRenderer.invoke('files:write', file.name, new Uint8Array(await file.arrayBuffer()));
+  },
   aiSetupLocal: () => ipcRenderer.invoke('ai:setupLocal'),
   onAISetup: cb => ipcRenderer.on('ai:setup', (e, p) => cb(p)),
   onAIStatus: cb => ipcRenderer.on('ai-status', (e, s) => cb(s)),
