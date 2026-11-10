@@ -1509,7 +1509,14 @@ const Sorter = (() => {
   renderLessons();
   const state = () => ({count: queue.length, pending: queue.filter(q => q.status !== 'filed').length,
     reading: queue.find(q => q.status === 'reading'), waiting: queue.filter(q => q.status === 'ready').length, last: lastFiled && lastFiled.status === 'filed' ? lastFiled : null});
-  return {read, intake, learn, state, onChange: fn => subs.push(fn), getLessons: () => lessons, setLessons: l => { lessons = Array.isArray(l) ? l : []; renderLessons(); }};
+  // pick the best folder for a piece of text (used when the AI saves a note without naming a folder)
+  function suggestFor({title = '', text = ''}){
+    const nameT = tok(title);
+    const tokens = [...nameT, ...nameT, ...tok(text.slice(0, 20000)).slice(0, 1500), 'type:note', 'ext:'];
+    const sug = suggestLocal({name: title, title, ext: '', type: 'note', text, tokens, nameT});
+    return sug.folder.startsWith('__new:') ? null : sug;
+  }
+  return {read, intake, learn, suggestFor, state, onChange: fn => subs.push(fn), getLessons: () => lessons, setLessons: l => { lessons = Array.isArray(l) ? l : []; renderLessons(); }};
 })();
 
 /* =========================================================
@@ -1768,8 +1775,16 @@ window.Stash = {
     }).join('; ');
   },
   async saveNote({title, body, folder, screenshot}){
+    // folder: the one the AI named (made if new) — or, if none was named, Smart Sort picks it
+    // using your folders and everything it has learned from where you put things
+    let why = '';
+    if (folder && /^(notes?|auto|any|default|best)$/i.test(String(folder).trim()) && !folders.find(x => x.name.toLowerCase() === String(folder).toLowerCase())) folder = '';
     let f = folder ? folders.find(x => x.name.toLowerCase() === String(folder).toLowerCase()) : null;
-    if (folder && !f){ f = {id: 'f-' + uid(), name: String(folder).slice(0, 40), icon: 'folder'}; folders.push(f); }
+    if (folder && !f){ f = {id: 'f-' + uid(), name: String(folder).slice(0, 40), icon: 'folder'}; folders.push(f); why = 'new folder'; }
+    if (!f){
+      const sug = Sorter.suggestFor({title, text: body});
+      if (sug && sug.conf >= .5 && isFolder(sug.folder)){ f = folders.find(x => x.id === sug.folder); why = sug.reason; }
+    }
     const fid = f ? f.id : (isFolder('notes') ? 'notes' : homeFolder('note'));
     const note = {id: uid(), type: 'note', title: String(title || 'Untitled').slice(0, 80), body: String(body || ''), t: Date.now(), folder: fid};
     items.unshift(note);
@@ -1779,9 +1794,10 @@ window.Stash = {
       try { const b = await (await fetch(screenshot)).blob(); shot.url = URL.createObjectURL(b); } catch (e) {}
       items.unshift(shot); src.push(shot);
     }
+    Sorter.learn(note, null, fid, 'accepted');
     render();
     const name = folders.find(x => x.id === fid).name;
-    return {text: `Saved “${note.title}” in ${name}${screenshot ? ' (with the screenshot)' : ''}.`, sources: src.map(it => ({id: it.id, title: it.title, folder: name}))};
+    return {text: `Saved “${note.title}” in ${name}${screenshot ? ' (with the screenshot)' : ''}${why && why !== 'new folder' ? ` — ${why.charAt(0).toLowerCase() + why.slice(1)}` : ''}.`, folder: name, sources: src.map(it => ({id: it.id, title: it.title, folder: name}))};
   },
   createFolder(name){
     name = String(name || '').trim().slice(0, 40) || 'New Folder';

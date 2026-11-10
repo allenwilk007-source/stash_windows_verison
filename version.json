@@ -1,6 +1,6 @@
 {
-  "version": "1.4.0",
-  "notes": "Free built-in AI — runs on your Mac, no account needed",
+  "version": "1.4.1",
+  "notes": "Notes from your screen get filed in the right folder automatically",
   "files": [
     "index.html",
     "quick.html",

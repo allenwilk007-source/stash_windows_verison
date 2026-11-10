@@ -153,12 +153,13 @@ async function captureScreen(){
 }
 async function preCapture(){ lastShot = screenAllowed() ? await captureScreen() : null; }
 const SCREEN_RE = /\b(on|of|from|in) (my |the )?screen\b|\bscreenshot\b|what i'?m (looking at|seeing|reading)|\b(this|that) (page|tab|window|error|message|tweet|post|email|image|picture|chart|graph|code|text|website|site|doc|document|video)\b|\bwhat does this\b|\bread this\b|\bexplain this\b|\bsummari[sz]e this\b|\bsave this\b|\bwhat is this\b/i;
+const SAVE_RE = /\b(make|save|add|put|write|jot|take|create|copy|keep|store)\b[\s\S]{0,40}\b(note|notes|stash|down|folder)\b/i;
 const NO_SCREEN_MSG = "I can't see your screen yet — Stash needs Screen Recording permission. I've opened the setting: switch on Stash under Privacy & Security › Screen & System Audio Recording, then quit and reopen Stash.";
 
 /* =====================  tools (shared by both brains)  ===================== */
 const TOOL_DEFS = [
   { name: 'look_at_screen', description: "Look at what is on the user's screen right now. Use it whenever they say 'this', 'on my screen', 'what am I looking at', 'what does this mean', or ask you to save/copy what's on screen.", params: { type: 'object', properties: {} } },
-  { name: 'save_note', description: "Save a note into the user's Stash library. Use for 'write this down', 'save this', 'put this in a note'. When saving what's on screen, write the useful content into the body (transcribe text, summarise, keep links). Set include_screenshot true to attach the screenshot.", params: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' }, folder: { type: 'string', description: "Folder name, default 'Notes'. Created if missing." }, include_screenshot: { type: 'boolean' } }, required: ['title', 'body'] } },
+  { name: 'save_note', description: "Save a note into the user's Stash library. Use for 'make a note', 'write this down', 'save this', 'put this in a note'. When saving what's on the screen, put the actual text from the screen into the body (transcribe it faithfully, keep links and numbers), and give it a short descriptive title. Only set folder if the user named one or an existing folder clearly fits; otherwise leave it out and Stash's Smart Sort will file it in the best folder automatically. Set include_screenshot true when the note is about something on screen.", params: { type: 'object', properties: { title: { type: 'string', description: 'Short descriptive title, e.g. "Hiring principles — Jake Paul post"' }, body: { type: 'string', description: 'The note text' }, folder: { type: 'string', description: 'Optional. Name of an existing folder, or a new one if the user asked for it.' }, include_screenshot: { type: 'boolean' } }, required: ['title', 'body'] } },
   { name: 'create_folder', description: 'Create a new folder in Stash.', params: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } },
   { name: 'search_stash', description: "Search the user's Stash library and get matching items with snippets.", params: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
   { name: 'open_in_stash', description: 'Open a folder or item in the Stash window.', params: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } }
@@ -184,7 +185,7 @@ async function runTool(name, input, { exec, status }, sources, setOpen){
 }
 const systemPrompt = lib => `You are Stash — Charlie's personal AI assistant on his Mac. You're a general assistant, not limited to his library: answer any question, explain things, write, plan, brainstorm, do maths, help with whatever is on his screen.
 You appear as a small bar at the top of the screen, so be brief by default (1–4 short sentences, or a few bullets). Plain text, at most light **bold**; no headings or tables.
-You can save and organise things in his Stash library with your tools. When you do, confirm in one short line what you saved and where. Only use a tool when it's actually needed.
+You can save and organise things in his Stash library with your tools. When he asks you to note/save something, call save_note (don't just reply with the text). Afterwards confirm in one short line what you saved and which folder it went in. Only use a tool when it's actually needed.
 Today is ${new Date().toDateString()}.
 STASH LIBRARY (for context): ${lib || '(empty)'}`;
 
@@ -262,7 +263,15 @@ async function askLocal(q, ctx){
     const msg = j.message || { role: 'assistant', content: '' };
     localHistory.push({ role: 'assistant', content: msg.content || '', ...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}) });
     if (!msg.tool_calls || !msg.tool_calls.length){
-      const text = String(msg.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      let text = String(msg.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      // small models sometimes write the note out instead of saving it — if you asked for a note
+      // and nothing was saved, save what it wrote (Smart Sort picks the folder)
+      if (SAVE_RE.test(q) && !sources.length && text.length > 20){
+        const body = text.replace(/^(sure|okay|ok|here(?:'s| is)[^:\n]*:)\s*/i, '').trim();
+        const title = (body.split('\n').find(l => l.trim()) || 'Screen note').replace(/^[#*\-\s]+|[*:]+$/g, '').slice(0, 60);
+        const saved = await runTool('save_note', { title, body, include_screenshot: !!images }, ctx, sources, id => open = id);
+        text = saved;
+      }
       return { text: text || "Sorry — I didn't get that. Try asking another way.", sources, open, ai: 'local' };
     }
     for (const tc of msg.tool_calls){
