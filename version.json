@@ -1,6 +1,6 @@
 {
-  "version": "1.2.1",
-  "notes": "Tap ⌘⌥ to talk to Stash (plus a Talk button)",
+  "version": "1.2.2",
+  "notes": "Fixes the ⌘⌥ talk bar not appearing",
   "files": [
     "index.html",
     "quick.html",

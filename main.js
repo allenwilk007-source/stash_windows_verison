@@ -63,7 +63,7 @@ function createWindow(){
     backgroundColor: '#141416',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false }
   });
-  win.loadFile('index.html');
+  win.loadFile(path.join(__dirname, 'index.html'));
   win.once('ready-to-show', () => win.show());
   // closing the window keeps Stash running in the menu bar
   win.on('close', e => { if (!quitting){ e.preventDefault(); win.hide(); } });
@@ -77,7 +77,7 @@ function createPopover(){
     vibrancy: 'popover', visualEffectState: 'active', roundedCorners: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false }
   });
-  pop.loadFile('quick.html');
+  pop.loadFile(path.join(__dirname, 'quick.html'));
   pop.on('blur', () => { if (!pop.webContents.isDevToolsOpened()) pop.hide(); });
 }
 
@@ -93,7 +93,7 @@ function createIsland(){
   isl.setAlwaysOnTop(true, 'screen-saver');
   isl.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   isl.setIgnoreMouseEvents(true, { forward: true });
-  isl.loadFile('island.html');
+  isl.loadFile(path.join(__dirname, 'island.html'));
   isl.on('blur', () => isl.webContents.send('island:blur'));
 }
 async function toggleIsland(){
