@@ -40,5 +40,9 @@ contextBridge.exposeInMainWorld('stashNative', {
   aiSetKey: (key, model) => ipcRenderer.invoke('ai:setKey', key, model),
   aiCreds: () => ipcRenderer.invoke('ai:creds'),
   onAICreds: cb => ipcRenderer.on('ai-creds', (e, c) => cb(c)),
+  aiStatus: () => ipcRenderer.invoke('ai:status'),
+  aiSetupLocal: () => ipcRenderer.invoke('ai:setupLocal'),
+  onAISetup: cb => ipcRenderer.on('ai:setup', (e, p) => cb(p)),
+  onAIStatus: cb => ipcRenderer.on('ai-status', (e, s) => cb(s)),
   onStatus: cb => ipcRenderer.on('status', (e, msg) => cb(msg))
 });

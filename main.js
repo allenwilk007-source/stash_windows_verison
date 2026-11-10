@@ -235,9 +235,12 @@ app.whenReady().then(() => {
   ipcMain.handle('ai:ask', async (e, q) => {
     const status = msg => { try { e.sender.send('island:status', msg); } catch (err) {} };
     try {
-      if (AI.hasKey()) return await AI.ask(String(q), { exec: execInMain, status });
-      const r = await execInMain(`window.Stash.command(${JSON.stringify(String(q))})`);
-      return { ...r, needsKey: !r.done };
+      const r = await AI.ask(String(q), { exec: execInMain, status });
+      if (r) return r;
+      // no AI set up yet: do simple Stash commands, and offer the free AI for everything else
+      const c = await execInMain(`window.Stash.command(${JSON.stringify(String(q))})`);
+      if (!c.done && !(c.sources || []).length) c.text = "I need the AI switched on to answer that — it's free, one click below.";
+      return { ...c, needsAI: !c.done, setup: await AI.status() };
     } catch (err) { return { text: 'Something went wrong: ' + (err.message || err) }; }
   });
   ipcMain.handle('ai:setKey', async (e, key, model) => {
@@ -246,6 +249,14 @@ app.whenReady().then(() => {
     return r;
   });
   ipcMain.handle('ai:creds', () => AI.creds());
+  ipcMain.handle('ai:status', () => AI.status());
+  ipcMain.handle('ai:setupLocal', async () => {
+    const send = p => [isl, win, pop].forEach(w => { try { if (w && !w.isDestroyed()) w.webContents.send('ai:setup', p); } catch (e) {} });
+    const r = await AI.setupLocal(send);
+    if (r.ok){ send({ stage: 'done', pct: 1, text: 'Free AI is ready' }); try { win.webContents.send('ai-status', await AI.status()); } catch (e) {} }
+    return r;
+  });
+  setTimeout(() => AI.warm(), 6000);   // start the free AI engine in the background so the first answer is quick
   ipcMain.handle('island:command', async (e, q) => {
     try { return await win.webContents.executeJavaScript(`window.Stash && window.Stash.command ? window.Stash.command(${JSON.stringify(String(q))}) : null`); }
     catch (err) { return { text: 'Something went wrong: ' + (err.message || err) }; }
@@ -283,5 +294,5 @@ app.whenReady().then(() => {
 
 app.on('activate', showMain);                 // clicking the Dock icon
 app.on('before-quit', () => { quitting = true; });
-app.on('will-quit', () => { globalShortcut.unregisterAll(); try { watcher && watcher.kill(); } catch (e) {} });
+app.on('will-quit', () => { globalShortcut.unregisterAll(); try { watcher && watcher.kill(); } catch (e) {} AI.stop(); });
 app.on('window-all-closed', e => e.preventDefault()); // keep living in the menu bar

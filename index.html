@@ -1034,7 +1034,7 @@ const Agent = (() => {
   const fname = it => folders.find(f => f.id === it.folder)?.name || '';
   const fullText = it => [it.link, it.body, (it.sections || []).map(([h, p]) => `${h}: ${p}`).join('\n'), it.text].filter(Boolean).join('\n');
   let docs = [], idf = new Map(), words = 0, history = [], busy = false;
-  let apiKey = '', model = 'claude-sonnet-4-5';
+  let apiKey = '', model = 'claude-sonnet-4-5', localAI = '';
 
   function reindex(){
     docs = items.map(it => {
@@ -1187,6 +1187,12 @@ const Agent = (() => {
         const {clean, src} = splitCites(full);
         body.innerHTML = fmt(clean) + srcHTML(src);
         history.push({role: 'user', content: q}, {role: 'assistant', content: full});
+      } else if (localAI && window.stashNative?.aiAsk){
+        // Mac app: the free on-device AI answers (same brain as the ⌘⌥ island)
+        const r = await window.stashNative.aiAsk(q);
+        const src = (r.sources || []).map(s => items.find(i => i.id === s.id)).filter(Boolean);
+        body.innerHTML = fmt(r.text || '') + srcHTML(src);
+        if (r.open) setTimeout(() => { const it = items.find(i => i.id === r.open); if (it){ view = it.folder; render(); openItem(it); } else { view = r.open; render(); } }, 500);
       } else {
         await new Promise(r => setTimeout(r, 450));
         const {text, src} = localAnswer(q);
@@ -1217,7 +1223,7 @@ const Agent = (() => {
   $('#agform').addEventListener('submit', e => { e.preventDefault(); ask($('#agin').value); });
   $('#msgs').addEventListener('click', e => { const s = e.target.closest('.src'); if (s){ const it = items.find(i => i.id === s.dataset.id); if (it) openItem(it); } });
   $('#agNew').onclick = () => { history = []; $('#msgs').innerHTML = ''; $('#agent').classList.remove('chatting'); $('#agin').focus(); };
-  const setStatus = () => { const st = $('#agstatus'); st.classList.toggle('on', !!apiKey); st.querySelector('span').textContent = apiKey ? `Claude · ${model}` : 'Local mode'; $('#agConnect').textContent = apiKey ? 'Settings' : 'Connect Claude'; };
+  const setStatus = () => { const st = $('#agstatus'); st.classList.toggle('on', !!apiKey || !!localAI); st.querySelector('span').textContent = apiKey ? `Claude · ${model}` : localAI ? `Free AI · ${localAI}` : 'Local mode'; $('#agConnect').textContent = apiKey ? 'Settings' : 'Connect Claude'; };
   $('#agConnect').onclick = () => { $('#keyin').value = apiKey; $('#modelin').value = model; $('#keybox').classList.add('show'); setTimeout(() => $('#keyin').focus(), 50); };
   $('#keyform').addEventListener('submit', async e => {
     e.preventDefault(); const k = $('#keyin').value.trim(), m = $('#modelin').value.trim();
@@ -1251,8 +1257,9 @@ const Agent = (() => {
     reindex();
     return search(q).slice(0, 6).map(({d}) => ({id: d.it.id, title: d.it.title || 'Untitled', type: KIND[d.it.type], folder: fname(d.it), snippet: bestLines(d, q, 2).join(' · ').slice(0, 220)}));
   }
+  function setLocal(m){ localAI = m || ''; try { setStatus(); } catch (e) {} }
   function setCreds(c){ if (!c) return; apiKey = c.key || ''; if (c.model) model = c.model; try { setStatus(); } catch (e) {} }
-  return {reindex, show, hide, ask, answer, searchItems, setCreds, creds: () => ({apiKey, model})};
+  return {reindex, show, hide, ask, answer, searchItems, setCreds, setLocal, creds: () => ({apiKey, model})};
 })();
 
 /* =========================================================
@@ -1803,7 +1810,7 @@ window.Stash = {
       .replace(/\s*(for me)?\s*(please)?[.?!]*$/i, '').trim();
     // anything about the screen needs real AI (it can't be faked with a search)
     if (/\b(on|of|from) (my |the )?screen\b|\bscreenshot\b|what i'?m (looking at|seeing)|\bthis (page|tab|window|error|message|tweet|post)\b/i.test(core))
-      return {...say("To read what's on your screen I need the full AI switched on — paste your Anthropic API key below and I'll do it straight away."), needsKey: true};
+      return {...say("To read what's on your screen I need the AI switched on — tap the button below (it's free) and I'll do it straight away."), needsKey: true};
     let m;
     if ((m = core.match(/^(?:make|create|add|write|save|take|jot(?: down)?)\s+(?:me\s+)?(?:a\s+)?(?:new\s+|quick\s+)?note\b[\s:,-]*(?:that says|saying|about|called|titled|to)?\s*([\s\S]*)$/i)) || (m = core.match(/^(?:note|remember)(?: that)?[\s:,-]+([\s\S]+)$/i))){
       const text = (m[1] || '').trim();
@@ -1837,6 +1844,9 @@ if (window.stashNative){
   document.body.classList.add('native');
   N.aiCreds?.().then(c => { if (c && c.key) Agent.setCreds(c); }).catch(() => {});
   N.onAICreds?.(c => Agent.setCreds(c));
+  const applyStatus = s => { if (s && s.local) Agent.setLocal(s.local.ready ? s.local.model : ''); };
+  N.aiStatus?.().then(applyStatus).catch(() => {});
+  N.onAIStatus?.(applyStatus);
   if (N.islandToggle){ const t = document.getElementById('talkTop'); t.style.display = ''; t.onclick = () => N.islandToggle(); }
   const b64ToFile = f => { const bin = atob(f.data), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return new File([a], f.name, {type: f.type}); };
   N.onIntake(files => Sorter.intake(files.map(b64ToFile)));
