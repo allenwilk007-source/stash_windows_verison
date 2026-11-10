@@ -1,0 +1,1766 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Stash</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@1&display=swap" rel="stylesheet">
+<style>
+:root{
+  --text:#f2f2f3; --muted:rgba(255,255,255,.5); --faint:rgba(255,255,255,.32);
+  --glass:rgba(22,22,26,.58); --card:rgba(255,255,255,.045); --card-h:rgba(255,255,255,.075);
+  --line:rgba(255,255,255,.08); --line2:rgba(255,255,255,.14); --sel:rgba(255,255,255,.09);
+  --ease:cubic-bezier(.7,0,.2,1);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:#0c0c0d;color:var(--text);font-family:Inter,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+button,select{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+input,textarea{font:inherit;color:inherit}
+
+/* ---------- animated background ---------- */
+#bg{position:absolute;inset:0;width:100%;height:100%;display:block;z-index:0;pointer-events:none}
+.grain{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:1;background-size:180px 180px;
+  will-change:background-position}
+@keyframes grain{0%{transform:translate(0,0)}20%{transform:translate(-3%,2%)}40%{transform:translate(2%,-3%)}60%{transform:translate(-2%,-1%)}80%{transform:translate(3%,3%)}100%{transform:translate(0,0)}}
+
+/* ---------- app window ---------- */
+.app{position:fixed;left:50%;top:50%;width:min(860px,calc(100vw - 32px));height:min(620px,calc(100vh - 32px));transform:translate(-50%,-50%);
+  display:grid;grid-template-columns:200px 1fr;grid-template-rows:46px 1fr;border-radius:18px;overflow:hidden;
+  background:#1a1a1a;
+  border:1px solid var(--line2);box-shadow:0 40px 120px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.06);
+  transition:width .55s var(--ease),height .55s var(--ease),border-radius .55s var(--ease),opacity .4s,transform .55s var(--ease)}
+.app.big{width:calc(100vw - 32px);height:calc(100vh - 32px)}
+.app.hidden{opacity:0;transform:translate(-50%,-60%) scale(.6);pointer-events:none}
+
+.app>.bar,.app>.side,.app>.main{position:relative;z-index:1}
+/* title bar */
+.bar{grid-column:1/3;display:flex;align-items:center;gap:14px;padding:0 14px;border-bottom:1px solid var(--line);-webkit-user-select:none;user-select:none}
+.lights{display:flex;gap:8px;width:186px}
+.lights button{width:12px;height:12px;border-radius:50%;position:relative}
+.lights .r{background:#ff5f57}.lights .y{background:#febc2e}.lights .g{background:#28c840}
+.lights button:after{content:"";position:absolute;inset:0;display:grid;place-items:center;font-size:9px;line-height:12px;text-align:center;color:rgba(0,0,0,.6);opacity:0}
+.lights:hover button:after{opacity:1}
+.lights .r:after{content:"×"}.lights .y:after{content:"–"}.lights .g:after{content:"+"}
+.title{flex:1;font-size:13px;font-weight:600;color:var(--muted);text-align:center}
+.title b{color:var(--text);font-weight:600}
+.search{display:flex;align-items:center;gap:7px;height:28px;width:200px;padding:0 10px;border-radius:8px;background:rgba(255,255,255,.06);border:1px solid var(--line)}
+.search svg{width:13px;height:13px;opacity:.5;flex:none}
+.search input{background:none;border:0;outline:0;width:100%;font-size:12.5px}
+.search input::placeholder{color:var(--faint)}
+
+/* sidebar */
+.side{border-right:1px solid var(--line);padding:12px 10px;display:flex;flex-direction:column;gap:2px;overflow:auto;background:rgba(0,0,0,.12)}
+.side h6{font-size:10.5px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;padding:12px 10px 6px}
+.side h6:first-child{padding-top:2px}
+.nav{display:flex;align-items:center;gap:10px;height:30px;padding:0 10px;border-radius:7px;font-size:13px;color:rgba(255,255,255,.75);width:100%;text-align:left;transition:background .15s}
+.nav svg{width:15px;height:15px;opacity:.7;flex:none}
+.nav span{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav em{font-style:normal;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.nav:hover{background:rgba(255,255,255,.05)}
+.nav.on{background:var(--sel);color:#fff}
+.nav.on svg{opacity:1}
+.nav.drop{background:rgba(90,140,255,.22);outline:1px solid rgba(120,160,255,.6)}
+.newf{margin-top:auto;color:var(--muted)}
+
+/* main */
+.main{position:relative;overflow:hidden;display:flex;flex-direction:column}
+.head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:22px 24px 14px}
+.head h1{font-size:24px;font-weight:600;letter-spacing:-.03em;line-height:1;border-radius:6px;outline:0;padding:2px 4px;margin:-2px -4px}
+.head h1.renamable{cursor:text}.head h1.renamable:hover{background:rgba(255,255,255,.06)}
+.head h1[contenteditable=true]{background:rgba(255,255,255,.08);box-shadow:0 0 0 1px rgba(255,255,255,.25)}
+.head p{font-size:12px;color:var(--muted);margin-top:6px}
+.btns{display:flex;gap:8px}
+.btn{height:32px;padding:0 14px;border-radius:999px;font-size:12.5px;font-weight:500;display:flex;align-items:center;gap:6px;border:1px solid var(--line2);transition:background .15s}
+.btn:hover{background:rgba(255,255,255,.07)}
+.btn.w{background:#fff;color:#111;border-color:#fff;font-weight:600}
+.btn.w:hover{background:#e9e9e9}
+.grid{flex:1;overflow:auto;padding:4px 24px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:14px;align-content:start}
+.tile{border-radius:12px;padding:8px;background:var(--card);border:1px solid var(--line);cursor:pointer;transition:background .2s,transform .2s,border-color .2s;animation:in .35s var(--ease) both}
+.tile:hover{background:var(--card-h);border-color:var(--line2);transform:translateY(-2px)}
+.tile.dragging{opacity:.4}
+@keyframes in{from{opacity:0;transform:translateY(6px)}}
+.th{aspect-ratio:4/3;border-radius:7px;overflow:hidden;position:relative;background:#1b1b1f}
+.th img,.th video{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.nm{font-size:12.5px;font-weight:500;margin:9px 2px 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mt{font-size:11px;color:var(--faint);margin:0 2px 2px;display:flex;justify-content:space-between}
+.mt .st{color:#ffd66b}
+.empty{grid-column:1/-1;border:1.5px dashed var(--line2);border-radius:14px;padding:50px 20px;text-align:center;color:var(--muted);font-size:13px;line-height:1.7}
+.empty b{display:block;color:var(--text);font-size:15px;font-weight:600}
+/* thumbs */
+.play{position:absolute;left:50%;top:50%;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);display:grid;place-items:center}
+.play:after{content:"";border-left:9px solid #fff;border-top:5.5px solid transparent;border-bottom:5.5px solid transparent;margin-left:3px}
+.dur{position:absolute;right:5px;bottom:5px;font-size:9.5px;font-weight:600;padding:2px 5px;border-radius:4px;background:rgba(0,0,0,.6)}
+.note-th{height:100%;padding:12px;background:#f4f1ea;color:#1a1a1a}
+.note-th h4{font-size:12px;font-weight:600;margin-bottom:6px}
+.note-th p{font-size:9px;line-height:1.5;color:#666;white-space:pre-line;overflow:hidden;max-height:70%}
+.doc-th{height:100%;display:grid;place-items:center;background:linear-gradient(160deg,#26262b,#141417)}
+.page{width:42%;aspect-ratio:3/4;background:#f6f4ef;border-radius:3px;padding:8% 7%;position:relative;transform:translateY(14%);box-shadow:0 10px 24px rgba(0,0,0,.5)}
+.page span{display:block;height:2.5px;border-radius:2px;background:#d6d3cc;margin:7% 0}
+.badge{position:absolute;top:-6px;right:-9px;font-size:7.5px;font-weight:700;padding:2px 4px;border-radius:3px;color:#fff}
+
+/* preview panel (slides over the grid) */
+.pv{position:absolute;inset:0;display:flex;flex-direction:column;background:rgba(20,20,24,.72);backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(20px);transform:translateX(100%);transition:transform .45s var(--ease)}
+.pv.show{transform:none}
+.main .head,.main .grid{transition:opacity .3s}
+.main.viewing .head,.main.viewing .grid,.main.viewing .home{opacity:0;pointer-events:none}
+.pv{z-index:10}
+.home{transition:opacity .3s}
+.pvbar{display:flex;align-items:center;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line)}
+.pvbar .sp{flex:1}
+.ib{height:28px;padding:0 10px;border-radius:7px;font-size:12px;display:flex;align-items:center;gap:6px;color:rgba(255,255,255,.8);text-decoration:none}
+.ib:hover{background:rgba(255,255,255,.07)}
+.ib select{font-size:12px;outline:0;max-width:130px}
+.ib select option{background:#1c1c20}
+.pvbody{flex:1;overflow:auto;position:relative}
+.media{position:absolute;inset:0;padding:20px}
+.media img,.media video{position:absolute;inset:20px;width:calc(100% - 40px);height:calc(100% - 40px);object-fit:contain;border-radius:10px}
+.media img{filter:drop-shadow(0 10px 30px rgba(0,0,0,.45))}
+.info{position:absolute;left:0;right:0;bottom:0;padding:14px 20px;display:flex;justify-content:space-between;align-items:flex-end;background:linear-gradient(transparent,rgba(0,0,0,.55))}
+.info h2{font-size:18px;font-weight:600;letter-spacing:-.02em}
+.info small{display:block;font-size:11px;color:var(--muted);margin-top:3px}
+.editor{max-width:620px;margin:0 auto;padding:28px 24px}
+.editor input{width:100%;background:none;border:0;outline:0;font-size:28px;font-weight:600;letter-spacing:-.03em;margin-bottom:14px}
+.editor textarea{width:100%;min-height:340px;background:none;border:0;outline:0;resize:none;font-size:14px;line-height:1.75;color:rgba(255,255,255,.82)}
+.editor input::placeholder,.editor textarea::placeholder{color:var(--faint)}
+.docpage{max-width:620px;margin:24px auto;background:#f6f4ef;color:#141414;border-radius:8px;padding:40px 44px;min-height:420px}
+.docpage h2{font-size:22px;letter-spacing:-.02em}
+.docpage .sub{color:#888;font-size:12px;margin:4px 0 22px}
+.docpage h3{font-size:13.5px;margin:18px 0 6px}
+.docpage p,.docpage pre{font-size:13px;line-height:1.7;color:#333;white-space:pre-wrap}
+.docpage pre{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}
+
+/* ---------- island (minimised) ---------- */
+.island{position:fixed;left:50%;top:14px;transform:translate(-50%,-90px);display:flex;align-items:center;gap:12px;height:44px;padding:0 8px 0 16px;border-radius:999px;
+  background:rgba(10,10,12,.85);backdrop-filter:blur(20px);border:1px solid var(--line2);box-shadow:0 12px 40px rgba(0,0,0,.5);
+  font-size:12.5px;transition:transform .55s var(--ease);cursor:pointer;z-index:20}
+.island.show{transform:translate(-50%,0)}
+.island .dot{width:8px;height:8px;border-radius:50%;background:linear-gradient(135deg,#f6e3ae,#4f86e8)}
+.island em{font-style:normal;color:var(--muted)}
+.island button{height:30px;padding:0 12px;border-radius:999px;background:#fff;color:#111;font-weight:600;font-size:12px}
+
+.dropall{position:fixed;inset:0;z-index:30;display:grid;place-items:center;pointer-events:none;opacity:0;transition:opacity .2s;background:rgba(0,0,0,.25)}
+.dropall div{padding:18px 26px;border-radius:14px;border:1.5px dashed rgba(255,255,255,.5);background:rgba(20,20,24,.7);backdrop-filter:blur(12px);font-size:14px}
+.dropall.show{opacity:1}
+.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);opacity:0;padding:9px 16px;border-radius:999px;background:rgba(20,20,24,.85);backdrop-filter:blur(14px);border:1px solid var(--line2);font-size:12.5px;transition:.3s var(--ease);z-index:40;pointer-events:none}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* ---------- home: network page with dot-matrix hands ---------- */
+.home{position:absolute;inset:0;display:none;overflow:hidden}
+.main.at-home .home{display:block}
+.main.at-home .head,.main.at-home .grid{display:none}
+#dots{position:absolute;inset:0;width:100%;height:100%;display:block}
+.links{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.links path{fill:none;stroke:rgba(255,255,255,.16);stroke-width:1;stroke-dasharray:2 5;animation:flow 2.4s linear infinite}
+.links circle{fill:#fff}
+@keyframes flow{to{stroke-dashoffset:-14}}
+.hcopy{position:absolute;left:50%;top:23%;transform:translateX(-50%);text-align:center;width:min(92%,520px);z-index:3}
+.hcopy h1{font-weight:500;letter-spacing:-.035em;line-height:1.04;font-size:clamp(24px,3vw,44px)}
+.hcopy h1 span{display:block;color:rgba(255,255,255,.42)}
+.hcopy p{margin:14px auto 0;max-width:300px;color:rgba(255,255,255,.55);font-size:clamp(12px,1vw,14px);line-height:1.45}
+.cta{display:inline-block;position:relative;margin-top:clamp(22px,3vw,40px)}
+.cta:before{content:"";position:absolute;left:10%;right:10%;bottom:-6px;height:16px;border-radius:50%;
+  background:linear-gradient(90deg,#ffcf5a,#7dffa8,#5ad7ff,#9b7bff,#ff6fd8,#ffb36b);filter:blur(9px);opacity:.85;transition:.3s}
+.cta button{position:relative;background:#fff;color:#111;padding:10px 19px;border-radius:999px;font-size:13px;font-weight:500;transition:transform .3s}
+.cta:hover:before{opacity:1;filter:blur(12px);bottom:-9px}
+.cta:hover button{transform:translateY(-1px)}
+.node{position:absolute;left:0;top:0;display:flex;align-items:center;gap:9px;padding:6px 11px 6px 6px;border-radius:14px;z-index:4;white-space:nowrap;cursor:pointer;
+  background:rgba(24,24,28,.62);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--line2);transition:border-color .2s,background .2s;will-change:transform}
+.node:hover{border-color:rgba(255,255,255,.32);background:rgba(34,34,40,.78)}
+.node.drop{border-color:rgba(120,160,255,.8);background:rgba(60,90,180,.35)}
+.node .ni{width:30px;height:30px;border-radius:9px;background:rgba(255,255,255,.08);display:grid;place-items:center;flex:none}
+.node .ni svg{width:15px;height:15px}
+.node b{display:block;font-size:12.5px;font-weight:600;line-height:1.2}
+.node small{font-size:10.5px;color:var(--muted)}
+.stack{display:flex;padding-left:7px}
+.home.tight .stack{display:none}
+.stack i{width:20px;height:20px;border-radius:5px;margin-left:-7px;border:1.5px solid #1d1d22;background:#2c2c33 center/cover;display:grid;place-items:center;font-style:normal;font-size:8px;color:#333}
+.node.add{border-style:dashed;background:rgba(24,24,28,.35);color:var(--muted)}
+.node.add .ni{background:none;border:1px dashed var(--line2)}
+
+/* ---------- Ask Stash: AI agent that learns from the library (Vesper-style) ---------- */
+.main.at-agent .head,.main.at-agent .grid,.main.at-agent .home{display:none}
+.agent{position:absolute;inset:0;display:none;flex-direction:column;overflow:hidden;background:#000}
+.main.at-agent .agent{display:flex}
+.main.viewing .agent{opacity:0;pointer-events:none}
+.agvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;pointer-events:none}
+.agent>*:not(.agvid):not(.keybox){position:relative;z-index:1}
+.agtop{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px}
+.agstatus{display:flex;align-items:center;gap:8px;font-size:12px;color:#d8d8d8;padding:6px 11px;border-radius:6px;background:rgba(0,0,0,.45);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.12)}
+.agstatus i{width:7px;height:7px;border-radius:50%;background:#f5b94a;box-shadow:0 0 8px #f5b94a}
+.agstatus.on i{background:#6cf08a;box-shadow:0 0 8px #6cf08a}
+.agtop .r{display:flex;gap:8px}
+/* liquid-glass buttons */
+.lbtn{position:relative;isolation:isolate;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;padding:0 14px;border-radius:6px;font-size:12.5px;font-weight:500;letter-spacing:-.02em;line-height:1;white-space:nowrap;cursor:pointer;transition:background .35s,border-color .35s,box-shadow .35s,color .35s}
+.lbtn:after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(115deg,transparent 20%,rgba(255,255,255,.45) 48%,transparent 76%);transform:translateX(-130%);transition:transform .65s ease}
+.lbtn:hover:after{transform:translateX(130%)}
+.lbtn.solid{background:linear-gradient(180deg,#fff 0%,#e7e7e7 48%,#cfcfcf 100%);color:#111;border:1px solid #fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.95)}
+.lbtn.solid:hover{background:linear-gradient(180deg,#fff 0%,#f3f6ff 42%,#d5def2 100%);border-color:#f2f6ff;box-shadow:inset 0 1px 0 #fff,0 0 22px rgba(186,208,255,.35),0 8px 18px rgba(255,255,255,.12)}
+.lbtn.ghost{background:linear-gradient(135deg,rgba(255,255,255,.12),rgba(0,0,0,.5) 46%,rgba(150,170,200,.1));color:#fff;border:1px solid rgba(198,198,198,.55);box-shadow:inset 0 1px 0 rgba(255,255,255,.12);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+.lbtn.ghost:hover{border-color:rgba(220,230,255,.8);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 0 24px rgba(170,200,255,.28)}
+.lbtn.ghost:after{background:linear-gradient(115deg,transparent 20%,rgba(255,255,255,.18) 48%,transparent 76%)}
+.lbtn:disabled{opacity:.5;cursor:default}
+.agscroll{flex:1;overflow-y:auto;display:flex;flex-direction:column;padding:8px 20px 12px;scroll-behavior:smooth}
+.aghero{margin-top:auto;display:flex;flex-direction:column;align-items:center;text-align:center;padding-bottom:6px}
+.agent.chatting .aghero,.agent.chatting .agstats{display:none}
+.agbadge{display:inline-flex;align-items:center;gap:8px;margin-bottom:18px;padding:8px 14px;border-radius:5px;background:linear-gradient(90deg,#7d7d7d 0%,#2a2a2a 52%,#0a0a0a 100%);color:#f2f2f2;font-size:12px;letter-spacing:-.01em}
+.agbadge svg{width:16px;height:18px;filter:drop-shadow(0 0 3px rgba(255,255,255,.45));animation:in-star .9s .28s both}
+.aghero h1{font-weight:500;letter-spacing:-.045em;line-height:1.12;font-size:clamp(28px,3.4vw,46px);color:#fff}
+.aghero h1 .hl{display:block;overflow:hidden;padding:.06em .15em .14em}
+.aghero h1 .hl>span{display:inline-block;animation:in-mask 1.05s cubic-bezier(.16,1,.3,1) both}
+.aghero h1 .hl:nth-child(1)>span{animation-delay:.12s}.aghero h1 .hl:nth-child(2)>span{animation-delay:.3s}
+.aghero h1 em{font-family:"Instrument Serif","Times New Roman",Times,serif;font-style:italic;font-weight:400;font-size:1.08em;letter-spacing:-.03em;color:#9a9a9a;animation:in-em 1.2s .5s both}
+.aghero p{max-width:440px;margin-top:14px;color:#9a9a9a;font-size:14px;line-height:1.55;letter-spacing:-.015em;animation:in-soft 1.25s .5s cubic-bezier(.16,1,.3,1) both}
+.pills{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:20px;max-width:620px}
+.pill{position:relative;overflow:hidden;height:34px;padding:0 15px;border-radius:7px;border:1px solid rgba(198,198,198,.55);background:linear-gradient(105deg,#050505 0%,#2a2a2a 48%,#4a4a4a 100%);color:#f3f3f3;font-size:12.5px;letter-spacing:-.01em;white-space:nowrap;transition:background .35s,border-color .35s,box-shadow .35s;animation:in-scale 1.05s cubic-bezier(.16,1,.3,1) both}
+.pill:before{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 30%,rgba(255,255,255,.16) 50%,transparent 70%);transform:translateX(-120%);transition:transform .6s ease}
+.pill:hover:before{transform:translateX(120%)}
+.pill:hover{border-color:rgba(235,235,235,.9);background:linear-gradient(105deg,#111 0%,#3a3a3a 45%,#6a6a6a 100%);box-shadow:0 0 18px rgba(200,210,230,.18)}
+.msgs{display:flex;flex-direction:column;gap:14px;max-width:720px;width:100%;margin:0 auto;padding-top:8px}
+.agent.chatting .msgs{margin-top:auto}
+.msg{max-width:88%;padding:11px 14px;border-radius:12px;font-size:13.5px;line-height:1.6;letter-spacing:-.01em;animation:in-soft .5s cubic-bezier(.16,1,.3,1) both;white-space:pre-wrap;word-wrap:break-word}
+.msg.user{align-self:flex-end;background:linear-gradient(180deg,#fff,#e4e4e4);color:#111;border-bottom-right-radius:4px}
+.msg.ai{align-self:flex-start;background:rgba(0,0,0,.58);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid rgba(255,255,255,.14);color:#ececec;border-bottom-left-radius:4px}
+.msg.ai .who{display:flex;align-items:center;gap:7px;font-size:11px;color:#9a9a9a;margin-bottom:6px;white-space:normal}
+.msg.ai .who svg{width:13px;height:13px}
+.msg.ai b{color:#fff;font-weight:600}
+.msg.ai.err{border-color:rgba(255,120,120,.4)}
+.typing{display:inline-flex;gap:4px;padding:4px 0}
+.typing i{width:5px;height:5px;border-radius:50%;background:#bbb;animation:blink 1s infinite}
+.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+@keyframes blink{0%,100%{opacity:.25}50%{opacity:1}}
+.srcs{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;white-space:normal}
+.src{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px 0 6px;border-radius:6px;font-size:11.5px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);color:#ddd}
+.src:hover{background:rgba(255,255,255,.14);color:#fff}
+.src svg{width:12px;height:12px;opacity:.8}
+.agbar{display:flex;align-items:flex-end;gap:8px;width:calc(100% - 40px);max-width:720px;margin:0 auto 12px;padding:7px 7px 7px 14px;border-radius:12px;
+  background:linear-gradient(135deg,rgba(255,255,255,.1),rgba(0,0,0,.6) 50%,rgba(160,175,200,.08));border:1px solid rgba(198,198,198,.4);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.agbar:focus-within{border-color:rgba(220,230,255,.75);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 0 22px rgba(170,200,255,.2)}
+.agbar textarea{flex:1;background:none;border:0;outline:0;resize:none;font-size:13.5px;line-height:1.5;color:#fff;max-height:120px;padding:6px 0}
+.agbar textarea::placeholder{color:#8a8a8a}
+.agstats{display:flex;justify-content:space-between;gap:16px;padding:0 24px 16px;color:#d8d8d8;flex-wrap:wrap}
+.stat{display:inline-flex;align-items:center;gap:10px;font-size:12px;letter-spacing:-.015em;white-space:nowrap;animation:in-stat 1.05s cubic-bezier(.16,1,.3,1) both}
+.stat svg{width:18px;height:18px;flex:none}
+.stat:nth-child(2){animation-delay:.15s}.stat:nth-child(3){animation-delay:.3s}
+.keybox{position:absolute;inset:0;z-index:20;display:none;place-items:center;background:rgba(0,0,0,.5);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.keybox.show{display:grid}
+.keybox form{width:min(400px,calc(100% - 32px));padding:22px;border-radius:14px;background:rgba(14,14,16,.92);border:1px solid rgba(255,255,255,.14);display:flex;flex-direction:column;gap:12px}
+.keybox h3{font-size:16px;font-weight:600;letter-spacing:-.02em}
+.keybox p{font-size:12px;color:#9a9a9a;line-height:1.5}
+.keybox label{font-size:11px;color:#9a9a9a;display:flex;flex-direction:column;gap:5px}
+.keybox input{height:34px;padding:0 10px;border-radius:7px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);outline:0;font-size:13px;color:#fff}
+.keybox .row{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+.askbtn{display:flex;align-items:center;gap:6px;height:28px;padding:0 11px;border-radius:8px;font-size:12px;color:#eee;border:1px solid rgba(198,198,198,.4);background:linear-gradient(105deg,#050505 0%,#2a2a2a 48%,#4a4a4a 100%)}
+.askbtn svg{width:13px;height:14px}
+.askbtn:hover{border-color:rgba(235,235,235,.9)}
+@keyframes in-scale{from{opacity:0;transform:scale(.84)}}
+@keyframes in-soft{from{opacity:0;transform:translateY(14px)}}
+@keyframes in-mask{from{opacity:0;transform:translateY(40%)}}
+@keyframes in-stat{from{opacity:0;transform:translateY(20px)}}
+@keyframes in-star{0%{transform:scale(.2) rotate(-50deg)}65%{transform:scale(1.2) rotate(8deg)}100%{transform:none}}
+@keyframes in-em{from{opacity:.35;filter:blur(4px)}}
+@media (prefers-reduced-motion:reduce){.agent *,.agent *:before,.agent *:after{animation:none!important;transition:none!important}}
+
+/* ---------- folder management, add menu, links, dialogs ---------- */
+.nav .more{width:20px;height:20px;border-radius:5px;display:none;place-items:center;margin-right:-4px;color:var(--muted);flex:none}
+.nav .more:hover{background:rgba(255,255,255,.12);color:#fff}
+.nav[data-drop]:hover .more,.nav.on[data-drop] .more{display:grid}
+.nav[data-drop]:hover em,.nav.on[data-drop] em{display:none}
+.nav.ins-before{box-shadow:inset 0 2px 0 #7fa6ff}
+.nav.ins-after{box-shadow:inset 0 -2px 0 #7fa6ff}
+.nav.lifting{opacity:.4}
+.ctx{position:fixed;z-index:60;min-width:190px;padding:5px;border-radius:11px;background:rgba(22,22,26,.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--line2);box-shadow:0 18px 50px rgba(0,0,0,.5);display:none}
+.ctx.show{display:block;animation:pop .16s ease-out}
+@keyframes pop{from{opacity:0;transform:scale(.97)}}
+.ctx button{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border-radius:7px;font-size:12.5px;text-align:left;color:#e6e6e6}
+.ctx button:hover{background:rgba(255,255,255,.08)}
+.ctx button svg{width:14px;height:14px;opacity:.75;flex:none}
+.ctx button small{display:block;font-size:10.5px;color:var(--faint);margin-top:1px}
+.ctx button:disabled{opacity:.35;pointer-events:none}
+.ctx .danger{color:#ff8a80}.ctx .danger svg{opacity:1}
+.ctx hr{border:0;height:1px;background:var(--line);margin:4px 2px}
+.dlg{position:absolute;inset:0;z-index:30;display:none;place-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.dlg.show{display:grid}
+.dlg .box{width:min(400px,calc(100% - 32px));padding:20px;border-radius:14px;background:rgba(18,18,22,.95);border:1px solid var(--line2);box-shadow:0 30px 80px rgba(0,0,0,.6);display:flex;flex-direction:column;gap:12px;animation:pop .2s ease-out}
+.dlg h3{font-size:16px;font-weight:600;letter-spacing:-.02em}
+.dlg p{font-size:12.5px;color:var(--muted);line-height:1.55}
+.dlg label{font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:5px}
+.dlg input{height:34px;padding:0 10px;border-radius:7px;background:rgba(255,255,255,.06);border:1px solid var(--line2);outline:0;font-size:13px;color:#fff}
+.dlg input:focus{border-color:rgba(255,255,255,.35)}
+.dlg .row{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:4px}
+.btn.red{background:#e5484d;border-color:#e5484d;color:#fff;font-weight:600}
+.btn.red:hover{background:#f05a5f}
+.link-th{height:100%;display:flex;flex-direction:column;justify-content:flex-end;padding:12px;position:relative;overflow:hidden}
+.link-th .gl{position:absolute;top:10px;left:10px;width:26px;height:26px;border-radius:7px;background:rgba(255,255,255,.18);display:grid;place-items:center}
+.link-th .gl svg{width:14px;height:14px;color:#fff}
+.link-th b{font-size:13px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.link-th small{font-size:9.5px;color:rgba(255,255,255,.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.linkview{max-width:560px;margin:40px auto;padding:0 24px;display:flex;flex-direction:column;gap:14px}
+.linkview .card{border-radius:14px;padding:22px;min-height:150px;display:flex;flex-direction:column;justify-content:flex-end;gap:4px}
+.linkview .card b{font-size:22px;letter-spacing:-.02em;color:#fff}
+.linkview .card a{font-size:12px;color:rgba(255,255,255,.8);word-break:break-all}
+.linkview input,.linkview textarea{background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:9px;outline:0;padding:10px 12px;font-size:13.5px;color:#fff}
+.linkview textarea{min-height:140px;resize:vertical;line-height:1.6}
+.linkview .open{align-self:flex-start}
+
+/* ---------- Smart Sort tray ---------- */
+.tray{position:absolute;right:14px;bottom:14px;z-index:40;width:min(360px,calc(100% - 28px));max-height:calc(100% - 80px);display:none;flex-direction:column;border-radius:14px;overflow:hidden;
+  background:rgba(16,16,20,.9);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);border:1px solid var(--line2);box-shadow:0 24px 70px rgba(0,0,0,.55)}
+.tray.show{display:flex;animation:trayin .35s cubic-bezier(.16,1,.3,1)}
+@keyframes trayin{from{opacity:0;transform:translateY(16px) scale(.98)}}
+.tray header{display:flex;align-items:center;gap:8px;padding:12px 12px 10px 14px;border-bottom:1px solid var(--line)}
+.tray header .spark{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;background:linear-gradient(135deg,#f6e3ae,#4f86e8);color:#111;flex:none}
+.tray header .spark svg{width:12px;height:12px}
+.tray header b{font-size:13px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tray header button{height:26px;padding:0 9px;border-radius:7px;font-size:11.5px;color:#cfcfcf;border:1px solid var(--line)}
+.tray header button:hover{background:rgba(255,255,255,.07);color:#fff}
+.tray header .x{border:0;width:26px;padding:0;font-size:15px}
+.trayopts{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 14px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--line)}
+.sw{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.sw i{width:28px;height:16px;border-radius:999px;background:rgba(255,255,255,.18);position:relative;transition:background .2s;flex:none}
+.sw i:after{content:"";position:absolute;left:2px;top:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .2s}
+.sw.on i{background:#4f86e8}.sw.on i:after{transform:translateX(12px)}
+.trows{overflow-y:auto;padding:6px}
+.trow{display:flex;gap:10px;padding:9px 8px;border-radius:10px;animation:in .3s ease both}
+.trow+.trow{border-top:1px solid rgba(255,255,255,.05)}
+.trow .tth{width:40px;height:40px;border-radius:8px;flex:none;background:#24242a center/cover;display:grid;place-items:center;color:#aaa}
+.trow .tth svg{width:16px;height:16px}
+.trow .tm{flex:1;min-width:0}
+.trow .tn{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trow .ts{font-size:11px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.trow .why{font-size:10.5px;color:var(--faint);margin-top:4px;line-height:1.4}
+.trow select{max-width:170px;height:24px;border-radius:6px;padding:0 6px;font-size:11.5px;background:rgba(255,255,255,.07);border:1px solid var(--line2);color:#fff;outline:0}
+.trow select option{background:#1c1c20}
+.conf{font-size:10px;padding:2px 6px;border-radius:999px;background:rgba(108,240,138,.14);color:#8ff0a6}
+.conf.mid{background:rgba(245,185,74,.14);color:#f5c76a}.conf.low{background:rgba(255,138,128,.14);color:#ff9d94}
+.trow .go{height:24px;padding:0 9px;border-radius:6px;font-size:11px;font-weight:600;background:#fff;color:#111}
+.trow .undo{font-size:11px;color:#9ab8ff}
+.trow.filed .tn{color:#cfcfcf}
+.reading{display:inline-flex;align-items:center;gap:6px}
+.reading:before{content:"";width:10px;height:10px;border-radius:50%;border:1.5px solid rgba(255,255,255,.25);border-top-color:#fff;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.tfoot{display:flex;gap:8px;justify-content:flex-end;padding:10px 12px;border-top:1px solid var(--line)}
+.lessons{overflow-y:auto;padding:8px 10px 10px;display:none}
+.tray.learn .lessons{display:block}.tray.learn .trows,.tray.learn .tfoot,.tray.learn .trayopts{display:none}
+.lesson{display:flex;align-items:flex-start;gap:8px;padding:8px 6px;font-size:12px;line-height:1.45;border-bottom:1px solid rgba(255,255,255,.05)}
+.lesson span{flex:1;color:#ddd}.lesson small{display:block;color:var(--faint);font-size:10.5px}
+.lesson button{color:var(--faint);font-size:13px;width:20px;height:20px;border-radius:5px}.lesson button:hover{background:rgba(255,255,255,.08);color:#fff}
+.lessons .none{font-size:12px;color:var(--muted);padding:16px 6px;line-height:1.6}
+
+/* ---------- Smart Sort section (simple, same style as the rest of the app) ---------- */
+.main.at-sort .head,.main.at-sort .grid,.main.at-sort .home,.main.at-sort .agent{display:none}
+.sortv{position:absolute;inset:0;display:none;flex-direction:column;overflow:hidden}
+.main.at-sort .sortv{display:flex}
+.main.viewing .sortv{opacity:0;pointer-events:none}
+.svhead{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:22px 24px 14px}
+.svhead h1{font-size:24px;font-weight:600;letter-spacing:-.03em;line-height:1}
+.svhead p{font-size:12px;color:var(--muted);margin-top:6px}
+.svbody{flex:1;overflow:auto;padding:4px 24px 24px;display:flex;flex-direction:column;gap:14px}
+.dz{flex:1;min-height:180px;border:1.5px dashed var(--line2);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;cursor:pointer;
+  background:rgba(255,255,255,.02);transition:border-color .2s,background .2s,transform .2s}
+.dz:hover{border-color:rgba(255,255,255,.3);background:rgba(255,255,255,.04)}
+.sortv.over .dz{border-color:#7fa6ff;background:rgba(80,120,230,.12);transform:scale(1.01)}
+.dz .di{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;background:rgba(255,255,255,.07);border:1px solid var(--line2)}
+.dz .di svg{width:22px;height:22px}
+.dz b{font-size:15px;font-weight:600;letter-spacing:-.02em}
+.dz span{font-size:12.5px;color:var(--muted);max-width:340px;line-height:1.55}
+.sortv.has .dz{flex:none;min-height:0;flex-direction:row;justify-content:flex-start;text-align:left;padding:14px 16px;gap:12px}
+.sortv.has .dz .di{width:38px;height:38px;border-radius:10px}
+.sortv.has .dz .di svg{width:17px;height:17px}
+.sortv.has .dz b{font-size:13px}.sortv.has .dz span{font-size:11.5px}
+.sortv .tray.docked{position:relative;inset:auto;width:100%;max-height:none;display:none;border-radius:14px;box-shadow:none;background:var(--card);backdrop-filter:none;-webkit-backdrop-filter:none;animation:none}
+.sortv .tray.docked.show{display:flex}
+.sortv .tray.docked #trayClose{display:none}
+.sortv .tray.docked .trows{overflow:visible}
+
+/* ---------- running as the Mac app: the window IS the app ---------- */
+body.native{background:#141416}
+body.native .app{left:0;top:0;width:100%;height:100%;transform:none;border-radius:0;border:0;box-shadow:none}
+body.native .lights{visibility:hidden;width:64px}
+body.native .bar{-webkit-app-region:drag;padding-left:14px}
+body.native .bar button,body.native .bar label,body.native .bar input{-webkit-app-region:no-drag}
+body.native .island,body.native #zoom{display:none}
+.upd{position:fixed;left:50%;bottom:20px;transform:translate(-50%,30px);opacity:0;pointer-events:none;z-index:95;display:flex;align-items:center;gap:12px;padding:8px 8px 8px 14px;border-radius:999px;
+  background:rgba(20,20,24,.9);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid var(--line2);box-shadow:0 16px 40px rgba(0,0,0,.5);font-size:12.5px;transition:.4s cubic-bezier(.16,1,.3,1)}
+.upd.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+.upd i{width:8px;height:8px;border-radius:50%;background:#6cf08a;box-shadow:0 0 8px #6cf08a}
+.upd small{color:var(--muted)}
+.upd button{height:28px;padding:0 13px;border-radius:999px;font-size:12px;font-weight:600;background:#fff;color:#111}
+.upd .later{background:none;color:var(--muted);font-weight:500;padding:0 6px}
+
+@media (max-width:640px){
+  .app{grid-template-columns:1fr;grid-template-rows:46px auto 1fr}
+  .lights{width:auto}
+  .title{display:none}
+  .search{flex:1;width:auto}
+  .side{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:8px;gap:4px}
+  .side h6,.newf{display:none}
+  .nav{width:auto;flex:none}
+  .head{padding:16px 16px 10px}
+  .grid{padding:4px 16px 16px;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+}
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <canvas id="bg"></canvas>
+  <div class="grain"></div>
+  <div class="bar">
+    <div class="lights">
+      <button class="r" id="close" title="Minimise to island"></button>
+      <button class="y" id="mini" title="Minimise to island"></button>
+      <button class="g" id="zoom" title="Expand"></button>
+    </div>
+    <div class="title"><b>Stash</b> — <span id="crumb">All Items</span></div>
+    <button class="askbtn" id="askTop" title="Ask Stash (⌘J)"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.6C12.55 2.6 12.88 3.15 13.08 4.7c.62 4.7 1.52 5.6 6.22 6.22 1.55.2 2.1.53 2.1 1.08s-.55.88-2.1 1.08c-4.7.62-5.6 1.52-6.22 6.22-.2 1.55-.53 2.1-1.08 2.1s-.88-.55-1.08-2.1c-.62-4.7-1.52-5.6-6.22-6.22C3.15 12.88 2.6 12.55 2.6 12s.55-.88 2.1-1.08c4.7-.62 5.6-1.52 6.22-6.22C11.12 3.15 11.45 2.6 12 2.6Z"/></svg>Ask</button>
+    <label class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" placeholder="Search" autocomplete="off">
+    </label>
+  </div>
+
+  <aside class="side" id="side"></aside>
+  <section class="tray" id="tray">
+    <header><span class="spark"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.6C12.55 2.6 12.88 3.15 13.08 4.7c.62 4.7 1.52 5.6 6.22 6.22 1.55.2 2.1.53 2.1 1.08s-.55.88-2.1 1.08c-4.7.62-5.6 1.52-6.22 6.22-.2 1.55-.53 2.1-1.08 2.1s-.88-.55-1.08-2.1c-.62-4.7-1.52-5.6-6.22-6.22C3.15 12.88 2.6 12.55 2.6 12s.55-.88 2.1-1.08c4.7-.62 5.6-1.52 6.22-6.22C11.12 3.15 11.45 2.6 12 2.6Z"/></svg></span><b id="trayTitle">Smart Sort</b><button id="trayLearn">Learned</button><button class="x" id="trayClose" title="Close">×</button></header>
+    <div class="trayopts"><label class="sw on" id="autoSw"><i></i>Auto-file when confident</label><span id="trayMode">On-device</span></div>
+    <div class="trows" id="trows"></div>
+    <div class="lessons" id="lessons"></div>
+    <div class="tfoot"><button class="btn" id="trayClear">Clear done</button><button class="btn w" id="trayAll">File all</button></div>
+  </section>
+
+  <main class="main" id="main">
+    <section class="home" id="home">
+      <canvas id="dots"></canvas>
+      <svg class="links" id="links"></svg>
+      <div class="hcopy">
+        <h1><span>Everything you keep,</span>in one place.</h1>
+        <p id="hsub"></p>
+        <div class="cta"><button id="hcta">+ New Note</button></div>
+      </div>
+      <div id="nodes"></div>
+    </section>
+    <section class="sortv" id="sortv">
+      <div class="svhead">
+        <div><h1>Smart Sort</h1><p>Drop files in — Stash reads each one and puts it in the right folder.</p></div>
+        <div class="btns"><button class="btn w" id="svup">Upload</button></div>
+      </div>
+      <div class="svbody" id="svbody">
+        <div class="dz" id="svdz">
+          <div class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></svg></div>
+          <div><b>Drag &amp; drop files here</b><br><span>Images, videos, PDFs, docs, anything. It learns from where you put things, so it gets better every time.</span></div>
+        </div>
+      </div>
+    </section>
+    <section class="agent" id="agent">
+      <video class="agvid" id="agvid" src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260818_072341_50851634-bbc3-4c33-9acc-7647d4db44aa.mp4" muted loop playsinline preload="auto"></video>
+      <div class="agtop">
+        <div class="agstatus" id="agstatus"><i></i><span>Local mode</span></div>
+        <div class="r">
+          <button class="lbtn ghost" id="agConnect">Connect Claude</button>
+          <button class="lbtn ghost" id="agNew">New chat</button>
+        </div>
+      </div>
+      <div class="agscroll" id="agscroll">
+        <div class="aghero">
+          <div class="agbadge"><svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2.6C12.55 2.6 12.88 3.15 13.08 4.7c.62 4.7 1.52 5.6 6.22 6.22 1.55.2 2.1.53 2.1 1.08s-.55.88-2.1 1.08c-4.7.62-5.6 1.52-6.22 6.22-.2 1.55-.53 2.1-1.08 2.1s-.88-.55-1.08-2.1c-.62-4.7-1.52-5.6-6.22-6.22C3.15 12.88 2.6 12.55 2.6 12s.55-.88 2.1-1.08c4.7-.62 5.6-1.52 6.22-6.22C11.12 3.15 11.45 2.6 12 2.6Z"/></svg>Learns from everything in your Stash</div>
+          <h1><span class="hl"><span>Ask <em>your stash</em> anything,</span></span><span class="hl"><span>get answers in seconds.</span></span></h1>
+          <p>Every note, document and file you drop in becomes something it knows. Ask a question, get an answer with the sources it came from.</p>
+          <div class="pills" id="pills"></div>
+        </div>
+        <div class="msgs" id="msgs"></div>
+      </div>
+      <form class="agbar" id="agform">
+        <textarea id="agin" rows="1" placeholder="Ask anything about your stash…"></textarea>
+        <button class="lbtn solid" id="agsend" type="submit">Ask</button>
+      </form>
+      <div class="agstats" id="agstats"></div>
+      <div class="keybox" id="keybox">
+        <form id="keyform">
+          <h3>Connect Claude</h3>
+          <p>Without a key, Stash answers by searching your library on this device. Add your Anthropic API key and it reads your notes and documents to give real answers. The key stays in this window only and is gone when you close it.</p>
+          <label>API key<input id="keyin" type="password" placeholder="sk-ant-…" autocomplete="off"></label>
+          <label>Model<input id="modelin" value="claude-sonnet-4-5" autocomplete="off"></label>
+          <div class="row"><button type="button" class="lbtn ghost" id="keyOff">Use local mode</button><button class="lbtn solid" type="submit">Connect</button></div>
+        </form>
+      </div>
+    </section>
+    <div class="head">
+      <div><h1 id="h1">All Items</h1><p id="sub"></p></div>
+      <div class="btns">
+        <button class="btn" id="folderMore" title="Folder options">•••</button>
+        <button class="btn w" id="addBtn">+ Add ▾</button>
+      </div>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="dlg" id="dlg"><div class="box" id="dlgbox"></div></div>
+    <section class="pv" id="pv">
+      <div class="pvbar" id="pvbar"></div>
+      <div class="pvbody" id="pvbody"></div>
+    </section>
+  </main>
+</div>
+
+<div class="island" id="island"><span class="dot"></span><b>Stash</b><em id="icount"></em><button id="iadd">+ Note</button></div>
+<div class="dropall" id="dropall"><div id="dropmsg">Drop — Stash will read it and file it for you</div></div>
+<div class="toast" id="toast"></div>
+<div class="ctx" id="ctx"></div>
+<input type="file" id="file" multiple hidden>
+
+<script>
+/* =========================================================
+   1. Background — dark field with a slowly moving blue/cream
+      horizon glow rising from the bottom-right corner
+   ========================================================= */
+(() => {
+  const cv = document.getElementById('bg'), ctx = cv.getContext('2d');
+  const RES = 0.5; let W, H;
+  // the gradient lives inside the app window, so size it to the window (and follow it when it resizes)
+  const host = document.getElementById('app');
+  function size(){ W = cv.width = Math.max(2, Math.ceil(host.clientWidth * RES)); H = cv.height = Math.max(2, Math.ceil(host.clientHeight * RES)); }
+  size(); new ResizeObserver(size).observe(host);
+
+  // Fitted from the reference frames: brightness follows  d ≈ y + ½x²  (screen-normalised),
+  // i.e. gently curved bands rising toward the bottom-right corner. Drawn as an ellipse
+  // centred above the screen; slow drift + breathing animates it.
+  const STOPS = [[0,'#1a1a1a'],[.74,'#1a1a1a'],[.76,'#1b1c22'],[.78,'#1b1f2b'],[.792,'#192339'],[.816,'#152d50'],[.828,'#193c7c'],
+    [.844,'#1d4f99'],[.876,'#427dc5'],[.9,'#5f92d0'],[.928,'#a1b2c8'],[.952,'#c8bfae'],[.98,'#d6c093'],[1,'#dcc48c']];
+  function draw(t){
+    // gentle wave: the glow rises and settles back to its resting height (never drops below it)
+    const w = (1 - Math.cos(t * .00045)) / 2;                  // 0 → 1 → 0, ~14 s per cycle
+    const sway = Math.sin(t * .00045 - .9) * .015;             // tiny sideways lag so it feels like a wave
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.save();
+    ctx.scale(W, H); ctx.translate(sway, -1 - w * .07); ctx.scale(1 / 1.414, 1);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 2.5 + w * .02);
+    STOPS.forEach(([o, col]) => g.addColorStop(o, col));
+    ctx.fillStyle = g; ctx.fillRect(-1, 0, 4, 3);
+    ctx.restore();
+
+    // soft light that swells with the wave near the corner
+    const lx = W * .8, ly = H * (1.02 - w * .08), r = Math.max(W, H) * .34;
+    const L = ctx.createRadialGradient(lx, ly, 0, lx, ly, r);
+    L.addColorStop(0, `rgba(150,185,255,${.12 + w * .14})`); L.addColorStop(.45, `rgba(90,130,230,${.05 + w * .07})`); L.addColorStop(1, 'rgba(60,90,200,0)');
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = L; ctx.fillRect(0, 0, W, H);
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+
+  // film grain: several random speckle frames, swapped ~16×/sec with a random offset so it crawls like real film
+  const grainEl = document.querySelector('.grain'), frames = [];
+  for (let f = 0; f < 6; f++){
+    const n = document.createElement('canvas'); n.width = n.height = 180;
+    const nx = n.getContext('2d'), img = nx.createImageData(180, 180);
+    for (let i = 0; i < img.data.length; i += 4){
+      const v = Math.random() < .5 ? 0 : 255;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = Math.random() * (v ? 9 : 14);
+    }
+    nx.putImageData(img, 0, 0);
+    frames.push(`url(${n.toDataURL()})`);
+  }
+  let gi = 0;
+  setInterval(() => {
+    gi = (gi + 1 + Math.floor(Math.random() * (frames.length - 1))) % frames.length;
+    grainEl.style.backgroundImage = frames[gi];
+    grainEl.style.backgroundPosition = `${Math.random() * 180 | 0}px ${Math.random() * 180 | 0}px`;
+  }, 60);
+  grainEl.style.backgroundImage = frames[0];
+})();
+
+/* =========================================================
+   2. Data
+   ========================================================= */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Math.random().toString(36).slice(2, 10);
+const fmtSize = b => !b ? '' : b < 1e6 ? Math.round(b/1e3)+' KB' : b < 1e9 ? (b/1e6).toFixed(1)+' MB' : (b/1e9).toFixed(1)+' GB';
+const fmtDate = t => new Date(t).toLocaleDateString(undefined,{month:'short',day:'numeric'});
+function rng(seed){ let s = seed >>> 0 || 1; return () => (s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296; }
+function scene(seed, p){
+  const r = rng(seed), W = 400, H = 300; let ridges = '';
+  [p[3], p[4], p[5]].forEach((col, k) => {
+    const base = H * (.5 + k * .14); let d = `M0 ${H} L0 ${base}`;
+    for (let x = 0; x <= W; x += 25) d += ` L${x} ${(base - r() * (50 - k * 12) - Math.sin(x / 60 + k) * 12).toFixed(1)}`;
+    ridges += `<path d="${d} L${W} ${H}Z" fill="${col}"/>`;
+  });
+  const sx = 70 + r() * 260, sy = 60 + r() * 60;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${p[0]}"/><stop offset="1" stop-color="${p[1]}"/></linearGradient></defs><rect width="${W}" height="${H}" fill="url(#g)"/><circle cx="${sx}" cy="${sy}" r="22" fill="${p[2]}"/>${ridges}</svg>`);
+}
+const PAL = [['#1d2b64','#f8cdda','#fff4e0','#6b5b95','#3d3561','#1e1a33'],['#0f2027','#2c5364','#d6f0ff','#20414f','#142c36','#0a1a20'],['#ff9a5a','#ffd3a5','#fff6e5','#c4624a','#8e3b36','#4a1f24'],['#0b0b12','#3a1c71','#ffaf7b','#4b2a6b','#2c1745','#140b22'],['#a1c4fd','#c2e9fb','#ffffff','#5f8fb4','#3b6584','#203b52'],['#134e5e','#71b280','#f4ffe0','#2e6b55','#1d4a3c','#0e2a22']];
+
+const ICON = {
+  sort:'<path d="M4 13l2.5-8h11L20 13"/><path d="M4 13v6h16v-6h-5l-1.5 2.5h-3L9 13z"/>',
+  link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  up:'<path d="M12 19V5M6 11l6-6 6 6"/>', down:'<path d="M12 5v14M6 13l6 6 6-6"/>', edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/>', trash:'<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>', upload:'<path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/>',
+  spark:'<path d="M12 2.6C12.55 2.6 12.88 3.15 13.08 4.7c.62 4.7 1.52 5.6 6.22 6.22 1.55.2 2.1.53 2.1 1.08s-.55.88-2.1 1.08c-4.7.62-5.6 1.52-6.22 6.22-.2 1.55-.53 2.1-1.08 2.1s-.88-.55-1.08-2.1c-.62-4.7-1.52-5.6-6.22-6.22C3.15 12.88 2.6 12.55 2.6 12s.55-.88 2.1-1.08c4.7-.62 5.6-1.52 6.22-6.22C11.12 3.15 11.45 2.6 12 2.6Z" fill="currentColor" stroke="none"/>',
+  all:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  star:'<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>',
+  recent:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  note:'<path d="M5 4h10l4 4v12H5z"/><path d="M9 12h6M9 16h4"/>',
+  doc:'<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
+  image:'<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-8 8"/>',
+  video:'<rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/>',
+  folder:'<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  home:'<circle cx="12" cy="12" r="3"/><circle cx="4.5" cy="5" r="2"/><circle cx="19.5" cy="5" r="2"/><circle cx="4.5" cy="19" r="2"/><circle cx="19.5" cy="19" r="2"/><path d="M6 6.5l3.8 3.6M18 6.5l-3.8 3.6M6 17.5l3.8-3.6M18 17.5l-3.8-3.6"/>',
+};
+const svg = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg>`;
+const KIND = {note:'Note', doc:'Document', image:'Image', video:'Video', link:'Link'};
+const HOME = {note:'notes', doc:'docs', image:'images', video:'videos', link:'docs'};
+
+let folders = [
+  {id:'notes', name:'Notes', icon:'note'},
+  {id:'docs', name:'Documents', icon:'doc'},
+  {id:'images', name:'Images', icon:'image'},
+  {id:'videos', name:'Videos', icon:'video'},
+  {id:'f-launch', name:'Launch Project', icon:'folder'},
+];
+const now = Date.now(), day = 864e5;
+let items = [
+  {type:'note', title:'Weekly Plan', body:'Mon — finish deck outline\nTue — record b-roll\nWed — edit + captions\nThu — review with team\nFri — publish', t:now-day*.2, star:true},
+  {type:'note', title:'Ideas', body:'Voice memos → to-dos app\nMini-series on planning a week\nRe-cut interview into 3 shorts', t:now-day*3},
+  {type:'note', title:'Reading List', body:'The Creative Act\nShow Your Work\nBuilding a Second Brain', t:now-day*7},
+  {type:'doc', title:'Brand Guidelines', ext:'PDF', color:'#e5484d', t:now-day*2, size:4.1e6, sections:[['Voice','Confident, direct, a little playful.'],['Color','Dark canvas, white type, one accent.']]},
+  {type:'doc', title:'Contract Draft', ext:'DOCX', color:'#3b82f6', t:now-day*5, size:220e3, sections:[['Scope','Three short-form videos per month.'],['Payment','Net 15 from invoice date.']]},
+  {type:'doc', title:'Q4 Budget', ext:'XLSX', color:'#22a06b', t:now-day*8, size:96e3, sections:[['Summary','Production 40% · Ads 35% · Tools 15% · Buffer 10%']]},
+  {type:'image', title:'Dusk Moodboard', seed:11, pal:0, t:now-day, size:2.4e6, star:true},
+  {type:'image', title:'Desert Study', seed:37, pal:2, t:now-day*4, size:3.1e6},
+  {type:'image', title:'Lake Reference', seed:53, pal:4, t:now-day*6, size:1.8e6},
+  {type:'image', title:'Forest Ridge', seed:83, pal:5, t:now-day*11, size:2.2e6},
+  {type:'video', title:'City B-Roll', seed:23, pal:1, dur:'0:42', t:now-day*1.5, size:88e6},
+  {type:'video', title:'Sunset Timelapse', seed:71, pal:3, dur:'0:18', t:now-day*10, size:42e6},
+  {type:'video', title:'Interview Take 3', seed:41, pal:3, dur:'12:08', t:now-day*2.5, size:640e6, folder:'f-launch', star:true},
+  {type:'note', title:'Launch Checklist', body:'☐ Final copy\n☐ Thumbnails ×3\n☐ Schedule posts\n☐ Email list', t:now-day*12, folder:'f-launch'},
+  {type:'link', title:'Landing page inspiration', link:'https://www.awwwards.com/websites/', body:'Reference for the launch page — dark hero, big type, one accent colour.', t:now-day*1.2, folder:'f-launch'},
+  {type:'doc', title:'Pitch Deck', ext:'KEY', color:'#a855f7', t:now-day*13, size:18e6, folder:'f-launch', sections:[['Problem','Files live in five different apps.'],['Solution','One place for everything you keep.']]},
+].map(it => ({id: uid(), folder: HOME[it.type], ...it, src: it.seed ? scene(it.seed, PAL[it.pal]) : null}));
+
+let view = 'home', query = '', open = null;
+
+/* =========================================================
+   3. Rendering
+   ========================================================= */
+const domainOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return u; } };
+const hueOf = s => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+const linkBg = it => { const h = hueOf(domainOf(it.link)); return `linear-gradient(140deg,hsl(${h} 55% 42%),hsl(${(h + 40) % 360} 60% 22%))`; };
+function thumb(it){
+  if (it.type === 'link') return `<div class="link-th" style="background:${linkBg(it)}"><span class="gl">${svg('link')}</span><b>${esc(domainOf(it.link))}</b><small>${esc(it.link.replace(/^https?:\/\//, ''))}</small></div>`;
+  if (it.type === 'image') return `<img src="${it.thumb || it.src}" alt="">`;
+  if (it.type === 'video') return (it.src || it.poster ? `<img src="${it.poster || it.src}" alt="">` : `<video src="${it.vsrc || it.url}#t=0.5" muted preload="metadata"></video>`) + `<div class="play"></div><div class="dur">${esc(it.dur || '')}</div>`;
+  if (it.type === 'note') return `<div class="note-th"><h4>${esc(it.title || 'Untitled')}</h4><p>${esc(it.body)}</p></div>`;
+  let l = ''; for (let i = 0; i < 7; i++) l += `<span style="width:${55 + (i * 37) % 45}%"></span>`;
+  return `<div class="doc-th"><div class="page"><div class="badge" style="background:${it.color}">${esc(it.ext)}</div>${l}</div></div>`;
+}
+const viewName = () => ({home:'Home', agent:'Ask Stash', sort:'Smart Sort', all:'All Items', starred:'Starred', recent:'Recent'})[view] || folders.find(f => f.id === view)?.name || '';
+function visible(){
+  let list = items.filter(it => view === 'all' || (view === 'starred' && it.star) || (view === 'recent' && now - it.t < 7 * day) || it.folder === view);
+  const ql = query.trim().toLowerCase();
+  if (ql) list = list.filter(it => (it.title + ' ' + (it.body || '') + ' ' + (it.ext || '')).toLowerCase().includes(ql));
+  return list.sort((a, b) => b.t - a.t);
+}
+
+function renderSide(){
+  const count = id => id === 'home' || id === 'agent' || id === 'sort' ? '' : id === 'all' ? items.length : id === 'starred' ? items.filter(i => i.star).length : id === 'recent' ? items.filter(i => now - i.t < 7 * day).length : items.filter(i => i.folder === id).length;
+  const row = (id, name, icon, droppable) => `<button class="nav ${view === id ? 'on' : ''}" data-v="${id}" ${droppable ? 'data-drop="1" draggable="true" title="Drag to reorder · right-click for options"' : ''}>${svg(icon)}<span>${esc(name)}</span><em>${count(id)}</em>${droppable ? '<i class="more" data-more="1">•••</i>' : ''}</button>`;
+  $('#side').innerHTML = `<h6>Library</h6>` + row('home', 'Home', 'home') + row('agent', 'Ask Stash', 'spark') + row('sort', 'Smart Sort', 'sort') + row('all', 'All Items', 'all') + row('starred', 'Starred', 'star') + row('recent', 'Recent', 'recent') +
+    `<h6>Folders</h6>` + folders.map(f => row(f.id, f.name, f.icon, true)).join('') +
+    `<button class="nav newf" id="newFolder">${svg('plus')}<span>New Folder</span></button>`;
+  $('#icount').textContent = `${items.length} items`;
+}
+function renderGrid(){
+  const list = visible();
+  $('#h1').textContent = viewName(); $('#crumb').textContent = viewName();
+  $('#h1').classList.toggle('renamable', isFolder(view)); $('#folderMore').style.display = isFolder(view) ? '' : 'none'; $('#h1').title = isFolder(view) ? 'Click to rename' : '';
+  $('#sub').textContent = `${list.length} item${list.length === 1 ? '' : 's'}${query ? ` matching “${query}”` : ''}`;
+  $('#grid').innerHTML = list.length ? list.map((it, k) => `
+    <div class="tile" draggable="true" data-id="${it.id}" style="animation-delay:${Math.min(k, 12) * 25}ms">
+      <div class="th">${thumb(it)}</div>
+      <div class="nm">${esc(it.title || 'Untitled')}</div>
+      <div class="mt"><span>${KIND[it.type]}${it.ext ? ' · ' + esc(it.ext) : ''}</span>${it.star ? '<span class="st">★</span>' : `<span>${fmtDate(it.t)}</span>`}</div>
+    </div>`).join('')
+    : `<div class="empty"><b>${query ? 'No matches' : 'Nothing here yet'}</b>${query ? 'Try a different search.' : 'Drop files here, or use Upload / New Note.'}</div>`;
+}
+const render = () => {
+  Persist.dirty();
+  renderSide();
+  const atHome = view === 'home';
+  $('#main').classList.toggle('at-home', atHome);
+  const atAgent = view === 'agent';
+  $('#main').classList.toggle('at-agent', atAgent);
+  Agent.reindex();
+  const atSort = view === 'sort';
+  $('#main').classList.toggle('at-sort', atSort);
+  if (atHome){ $('#crumb').textContent = 'Home'; Home.build(); }
+  else if (atAgent){ $('#crumb').textContent = 'Ask Stash'; Agent.show(); }
+  else if (atSort){ $('#crumb').textContent = 'Smart Sort'; }
+  else renderGrid();
+  if (!atAgent) Agent.hide();
+  if (atSort && !SortView.active()) SortView.show();
+  if (!atSort && SortView.active()) SortView.hide();
+};
+
+/* =========================================================
+   4. Preview / editor
+   ========================================================= */
+function openItem(it){
+  open = it;
+  const F = folders.find(f => f.id === it.folder);
+  $('#pvbar').innerHTML = `
+    <button class="ib" id="pBack">‹ Back</button><span class="sp"></span>
+    <label class="ib">${svg('folder').replace('<svg', '<svg width="13" height="13"')}<select id="pMove">${folders.map(f => `<option value="${f.id}" ${f.id === it.folder ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}</select></label>
+    <button class="ib" id="pStar">${it.star ? '★ Starred' : '☆ Star'}</button>
+    ${it.url ? `<a class="ib" href="${it.url}" download="${esc(it.fname || it.title)}">↓ Download</a>` : ''}
+    <button class="ib" id="pDel">Delete</button>`;
+  const info = `<div class="info"><div><h2>${esc(it.title)}</h2><small>${esc(F.name)} · ${KIND[it.type]} · ${fmtDate(it.t)}</small></div><small>${fmtSize(it.size)}${it.dur ? ' · ' + esc(it.dur) : ''}</small></div>`;
+  let b;
+  if (it.type === 'image') b = `<div class="media"><img src="${it.src}" alt=""></div>${info}`;
+  else if (it.type === 'video') b = it.url ? `<div class="media"><video src="${it.vsrc || it.url}" ${it.poster ? `poster="${it.poster}"` : ''} controls autoplay playsinline></video></div>` : `<div class="media"><img src="${it.src}" alt=""></div>${info}`;
+  else if (it.type === 'link') b = `<div class="linkview"><div class="card" style="background:${linkBg(it)}"><b>${esc(domainOf(it.link))}</b><a href="${esc(it.link)}" target="_blank" rel="noopener">${esc(it.link)}</a></div>
+      <a class="btn w open" href="${esc(it.link)}" target="_blank" rel="noopener">Open link ↗</a>
+      <input id="lT" placeholder="Title" value="${esc(it.title)}"><textarea id="lB" placeholder="Notes about this link…">${esc(it.body || '')}</textarea></div>`;
+  else if (it.type === 'note') b = `<div class="editor"><input id="nT" placeholder="Title" value="${esc(it.title)}"><textarea id="nB" placeholder="Start writing…">${esc(it.body)}</textarea></div>`;
+  else if (it.url && (it.mime === 'application/pdf' || it.ext === 'PDF')) b = `<iframe class="frame" src="${it.url}"></iframe>`;
+  else if (it.text != null) b = `<div class="docpage"><h2>${esc(it.title)}</h2><div class="sub">${esc(it.ext)} · ${fmtSize(it.size)}</div><pre>${esc(it.text)}</pre></div>`;
+  else if (it.sections) b = `<div class="docpage"><h2>${esc(it.title)}</h2><div class="sub">${esc(it.ext)} · ${fmtSize(it.size)} · ${fmtDate(it.t)}</div>${it.sections.map(([h, p]) => `<h3>${esc(h)}</h3><p>${esc(p)}</p>`).join('')}</div>`;
+  else b = `<div class="media"><div style="text-align:center;color:var(--muted);font-size:13px"><div style="font-size:16px;color:#fff;font-weight:600;margin-bottom:6px">${esc(it.fname || it.title)}</div>No preview for ${esc(it.ext)} files — use Download.</div></div>`;
+  $('#pvbody').innerHTML = b;
+  $('#pv').classList.add('show'); $('#main').classList.add('viewing');
+  if (it.type === 'note'){
+    const t = $('#nT'), x = $('#nB');
+    t.oninput = () => { it.title = t.value; it.t = Date.now(); Persist.dirty(); };
+    x.oninput = () => { it.body = x.value; it.t = Date.now(); Persist.dirty(); };
+    setTimeout(() => (it.title ? x : t).focus(), 350);
+  }
+  if (it.type === 'link'){
+    $('#lT').oninput = e => { it.title = e.target.value; Persist.dirty(); };
+    $('#lB').oninput = e => { it.body = e.target.value; Persist.dirty(); };
+  }
+  $('#pBack').onclick = closeItem;
+  $('#pStar').onclick = () => { it.star = !it.star; openItem(it); renderSide(); };
+  $('#pMove').onchange = e => { Sorter.learn(it, it.folder, e.target.value, 'moved'); it.folder = e.target.value; toast(`Moved to ${folders.find(f => f.id === it.folder).name}`); render(); };
+  $('#pDel').onclick = () => { if (it.url) URL.revokeObjectURL(it.url); items = items.filter(x => x !== it); open = null; closeItem(); toast('Deleted'); };
+}
+function closeItem(){
+  if (open && open.type === 'note' && !open.title && !open.body) items = items.filter(x => x !== open);
+  $('#pvbody').querySelectorAll('video').forEach(v => v.pause());
+  $('#pv').classList.remove('show'); $('#main').classList.remove('viewing'); open = null; render();
+}
+
+/* =========================================================
+   5. Actions
+   ========================================================= */
+function toast(m){ const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200); }
+const isFolder = id => folders.some(f => f.id === id);
+
+// where a new item goes: the folder you're in, else its type's folder, else the first folder (creating one if none exist)
+function homeFolder(type){
+  if (isFolder(view)) return view;
+  if (isFolder(HOME[type])) return HOME[type];
+  if (!folders.length) folders.push({id: 'f-' + uid(), name: 'Unsorted', icon: 'folder'});
+  return folders[0].id;
+}
+function newNote(){
+  const it = {id: uid(), type:'note', title:'', body:'', t: Date.now(), folder: homeFolder('note')};
+  items.unshift(it); render(); openItem(it);
+}
+// creates the folder right away, opens it, and lets you type its name in the header
+function newFolder(){
+  if (open) closeItem();
+  let name = 'New Folder', n = 2;
+  while (folders.some(f => f.name === name)) name = `New Folder ${n++}`;
+  const f = {id: 'f-' + uid(), name, icon: 'folder'}; folders.push(f);
+  view = f.id; render();
+  renameFolder(f);
+  toast('Folder created — type a name');
+}
+// inline rename: the folder title becomes editable (Enter saves, Esc cancels)
+function renameFolder(f){
+  if (view !== f.id){ view = f.id; render(); }
+  const h = $('#h1'), old = f.name;
+  h.contentEditable = 'true'; h.spellcheck = false; h.focus();
+  const r = document.createRange(); r.selectNodeContents(h);
+  const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+  const done = save => {
+    h.contentEditable = 'false'; h.onblur = h.onkeydown = null;
+    const v = h.textContent.trim();
+    f.name = save && v ? v.slice(0, 60) : old;
+    render();
+  };
+  h.onkeydown = e => { if (e.key === 'Enter'){ e.preventDefault(); done(true); } if (e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); done(false); } };
+  h.onblur = () => done(true);
+}
+const fileToDataURL = f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
+const loadImg = src => new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = src; });
+async function imageThumb(src, max = 640){
+  const im = await loadImg(src), k = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight));
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(im.naturalWidth * k)); c.height = Math.max(1, Math.round(im.naturalHeight * k));
+  const x = c.getContext('2d'); x.fillStyle = '#1b1b1f'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', .86);
+}
+const videoPoster = src => new Promise(res => {
+  const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto';
+  const done = r => { clearTimeout(to); res(r); };
+  const to = setTimeout(() => done(null), 6000);
+  v.onloadeddata = () => { try { v.currentTime = Math.min(.6, (v.duration || 1) / 3); } catch (e) { done(null); } };
+  v.onseeked = () => { try {
+    const k = Math.min(1, 640 / Math.max(v.videoWidth, v.videoHeight)), c = document.createElement('canvas');
+    c.width = v.videoWidth * k; c.height = v.videoHeight * k; c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+    done(c.toDataURL('image/jpeg', .82));
+  } catch (e) { done(null); } };
+  v.onerror = () => done(null); v.src = src;
+});
+const COLORS = {PDF:'#e5484d', DOC:'#3b82f6', DOCX:'#3b82f6', XLS:'#22a06b', XLSX:'#22a06b', CSV:'#22a06b', PPT:'#f97316', PPTX:'#f97316', KEY:'#a855f7'};
+// turns a dropped/uploaded File into a Stash item (text read by Smart Sort is kept so the AI can learn from it)
+function makeItem(f, feat){
+  const ext = (f.name.split('.').pop() || 'FILE').toUpperCase().slice(0, 5);
+  const it = {id: uid(), title: f.name.replace(/\.[^.]+$/, ''), t: Date.now(), size: f.size, url: URL.createObjectURL(f), mime: f.type, fname: f.name, ext};
+  if (f.type.startsWith('image/')){ it.type = 'image'; it.src = feat?.full || it.url; it.thumb = feat?.thumb || it.src; }
+  else if (f.type.startsWith('video/')){ it.type = 'video'; it.dur = feat?.dur || ext; it.vsrc = feat?.full || it.url; it.poster = feat?.poster || null; }
+  else { it.type = 'doc'; it.color = COLORS[ext] || '#5b5b63'; if (feat?.full) it.data = feat.full; }
+  if (feat?.text) it.text = feat.text;
+  return it;
+}
+// a known destination (you're inside a folder, or dropped onto one) files straight there;
+// otherwise Smart Sort reads each file and decides where it belongs
+async function addFiles(files, folder){
+  if (!folder) return Sorter.intake(files);
+  let n = 0;
+  for (const f of files){
+    const feat = await Sorter.read(f);
+    const it = makeItem(f, feat); it.folder = folder;
+    items.unshift(it); Sorter.learn(it, null, folder, 'direct'); n++;
+  }
+  if (n){ render(); toast(`Added ${n} item${n > 1 ? 's' : ''} to ${folders.find(f => f.id === folder).name}`); }
+}
+
+/* ---------- dialogs (in-app, so they work everywhere) ---------- */
+function dialog(html, onReady){
+  $('#dlgbox').innerHTML = html; $('#dlg').classList.add('show');
+  const close = () => $('#dlg').classList.remove('show');
+  onReady && onReady(close);
+  return close;
+}
+$('#dlg').addEventListener('mousedown', e => { if (e.target.id === 'dlg') $('#dlg').classList.remove('show'); });
+
+/* ---------- context menu ---------- */
+const ctx = $('#ctx');
+function menu(x, y, entries){
+  ctx.innerHTML = entries.map((m, k) => m === '-' ? '<hr>' : `<button data-k="${k}" class="${m.danger ? 'danger' : ''}" ${m.disabled ? 'disabled' : ''}>${svg(m.icon)}<span>${esc(m.label)}${m.sub ? `<small>${esc(m.sub)}</small>` : ''}</span></button>`).join('');
+  ctx.classList.add('show');
+  const r = ctx.getBoundingClientRect();
+  ctx.style.left = Math.min(x, innerWidth - r.width - 8) + 'px';
+  ctx.style.top = Math.min(y, innerHeight - r.height - 8) + 'px';
+  ctx.onclick = e => { const b = e.target.closest('[data-k]'); if (!b) return; hideMenu(); entries[+b.dataset.k].run(); };
+}
+const hideMenu = () => ctx.classList.remove('show');
+addEventListener('mousedown', e => { if (!e.target.closest('#ctx')) hideMenu(); });
+addEventListener('keydown', e => { if (e.key === 'Escape') hideMenu(); }, true);
+addEventListener('resize', hideMenu);
+
+/* ---------- add menu: notes aren't the only thing you keep ---------- */
+function addMenu(x, y){
+  const where = isFolder(view) ? folders.find(f => f.id === view).name : null;
+  menu(x, y, [
+    {icon: 'note', label: 'New note', sub: where ? `in ${where}` : 'Write something down', run: newNote},
+    {icon: 'upload', label: where ? 'Upload files' : 'Upload & auto-sort', sub: where ? `Into ${where}` : 'Stash reads each file and files it', run: () => $('#file').click()},
+    {icon: 'link', label: 'Save a link', sub: 'Websites, articles, references', run: addLink},
+  ]);
+}
+function addLink(){
+  dialog(`<h3>Save a link</h3>
+    <label>URL<input id="dU" placeholder="https://…" autocomplete="off"></label>
+    <label>Title (optional)<input id="dT" placeholder="Leave blank to use the site name" autocomplete="off"></label>
+    <div class="row"><button class="btn" id="dC">Cancel</button><button class="btn w" id="dOk">Save link</button></div>`, close => {
+    const go = () => {
+      let u = $('#dU').value.trim(); if (!u) return $('#dU').focus();
+      if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+      try { new URL(u); } catch (e) { $('#dU').focus(); return toast("That doesn't look like a link"); }
+      const it = {id: uid(), type: 'link', link: u, title: $('#dT').value.trim() || domainOf(u), body: '', t: Date.now(), folder: homeFolder('link')};
+      items.unshift(it); close(); render(); toast(`Link saved to ${folders.find(f => f.id === it.folder).name}`);
+    };
+    $('#dC').onclick = close; $('#dOk').onclick = go;
+    $('#dlgbox').onkeydown = e => { if (e.key === 'Enter') go(); if (e.key === 'Escape') close(); };
+    setTimeout(() => $('#dU').focus(), 30);
+  });
+}
+$('#addBtn').onclick = e => { const r = e.currentTarget.getBoundingClientRect(); addMenu(r.right - 200, r.bottom + 6); };
+
+/* ---------- folder management: rename, reorder, delete ---------- */
+function moveFolder(f, d){
+  const i = folders.indexOf(f), j = i + d; if (j < 0 || j >= folders.length) return;
+  folders.splice(i, 1); folders.splice(j, 0, f); render();
+}
+function deleteFolder(f){
+  const list = items.filter(i => i.folder === f.id), n = list.length;
+  dialog(`<h3>Delete “${esc(f.name)}”?</h3>
+    <p>${n ? `It has ${n} item${n === 1 ? '' : 's'} in it. You can keep them (they move back to their usual folders), or delete them along with the folder.` : 'This folder is empty.'}</p>
+    <div class="row"><button class="btn" id="dC">Cancel</button>
+      ${n ? '<button class="btn" id="dKeep">Delete folder, keep items</button>' : ''}
+      <button class="btn red" id="dAll">${n ? 'Delete folder + items' : 'Delete folder'}</button></div>`, close => {
+    const finish = keep => {
+      folders = folders.filter(x => x !== f);
+      if (keep){
+        list.forEach(it => {
+          it.folder = isFolder(HOME[it.type]) ? HOME[it.type] : (folders[0] || (folders.push({id: 'f-' + uid(), name: 'Unsorted', icon: 'folder'}), folders[0])).id;
+        });
+      } else {
+        list.forEach(it => it.url && URL.revokeObjectURL(it.url));
+        items = items.filter(it => it.folder !== f.id);
+      }
+      if (view === f.id) view = 'home';
+      close(); render(); toast(`Deleted “${f.name}”${n ? (keep ? ' — items kept' : ` and ${n} item${n === 1 ? '' : 's'}`) : ''}`);
+    };
+    $('#dC').onclick = close;
+    $('#dAll').onclick = () => finish(false);
+    if (n) $('#dKeep').onclick = () => finish(true);
+  });
+}
+function folderMenu(f, x, y){
+  const i = folders.indexOf(f);
+  menu(x, y, [
+    {icon: 'folder', label: 'Open', run: () => { if (open) closeItem(); view = f.id; render(); }},
+    {icon: 'edit', label: 'Rename', run: () => renameFolder(f)},
+    '-',
+    {icon: 'up', label: 'Move up', disabled: i === 0, run: () => moveFolder(f, -1)},
+    {icon: 'down', label: 'Move down', disabled: i === folders.length - 1, run: () => moveFolder(f, 1)},
+    '-',
+    {icon: 'trash', label: 'Delete folder', danger: true, run: () => deleteFolder(f)},
+  ]);
+}
+$('#folderMore').onclick = e => { const f = folders.find(f => f.id === view); if (!f) return; const r = e.currentTarget.getBoundingClientRect(); folderMenu(f, r.right - 190, r.bottom + 6); };
+// right-click a folder (sidebar or Home) for the same menu
+addEventListener('contextmenu', e => {
+  const n = e.target.closest('.nav[data-drop], .node[data-drop]'); if (!n) return;
+  e.preventDefault(); folderMenu(folders.find(f => f.id === n.dataset.v), e.clientX, e.clientY);
+});
+$('#file').onchange = e => { addFiles([...e.target.files], isFolder(view) ? view : null); e.target.value = ''; };
+$('#q').oninput = e => { query = e.target.value; if (view === 'home'){ view = 'all'; render(); } else renderGrid(); };
+$('#side').addEventListener('click', e => {
+  if (e.target.closest('#newFolder')) return newFolder();
+  const more = e.target.closest('[data-more]');
+  if (more){ e.stopPropagation(); const r = more.getBoundingClientRect(); folderMenu(folders.find(f => f.id === more.closest('[data-v]').dataset.v), r.left, r.bottom + 4); return; }
+  const b = e.target.closest('[data-v]'); if (!b) return;
+  if (open) closeItem();
+  view = b.dataset.v; render();
+});
+$('#side').addEventListener('dblclick', e => {
+  const b = e.target.closest('[data-drop]'); if (!b) return;
+  renameFolder(folders.find(f => f.id === b.dataset.v));
+});
+$('#h1').addEventListener('click', () => { const f = folders.find(f => f.id === view); if (f && $('#h1').contentEditable !== 'true') renameFolder(f); });
+$('#grid').addEventListener('click', e => { const t = e.target.closest('.tile'); if (t) openItem(items.find(i => i.id === t.dataset.id)); });
+
+/* drag tiles onto a sidebar folder to move them */
+let dragId = null;
+$('#grid').addEventListener('dragstart', e => { const t = e.target.closest('.tile'); if (!t) return; dragId = t.dataset.id; t.classList.add('dragging'); e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed = 'move'; });
+$('#grid').addEventListener('dragend', e => { dragId = null; e.target.closest('.tile')?.classList.remove('dragging'); clearDrop(); });
+const clearDrop = () => document.querySelectorAll('.nav.drop,.node.drop,.nav.ins-before,.nav.ins-after').forEach(n => n.classList.remove('drop', 'ins-before', 'ins-after'));
+let dragFolder = null;
+$('#side').addEventListener('dragstart', e => {
+  const n = e.target.closest('.nav[data-drop]'); if (!n) return;
+  dragFolder = n.dataset.v; n.classList.add('lifting');
+  e.dataTransfer.setData('text/plain', 'folder'); e.dataTransfer.effectAllowed = 'move';
+});
+$('#side').addEventListener('dragend', e => { dragFolder = null; e.target.closest('.nav')?.classList.remove('lifting'); clearDrop(); });
+
+/* drop files anywhere (onto a folder = into that folder) */
+const dropall = $('#dropall'); let depth = 0;
+const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
+addEventListener('dragenter', e => { if (hasFiles(e)){ depth++; if (view === 'sort') $('#sortv').classList.add('over'); else dropall.classList.add('show'); } });
+addEventListener('dragleave', e => { if (hasFiles(e) && --depth <= 0){ depth = 0; dropall.classList.remove('show'); $('#sortv').classList.remove('over'); } });
+addEventListener('dragover', e => {
+  e.preventDefault();
+  const n = e.target.closest?.('[data-drop]'); clearDrop();
+  if (dragFolder){
+    const t = e.target.closest?.('.nav[data-drop]');
+    if (t && t.dataset.v !== dragFolder){ const r = t.getBoundingClientRect(); t.classList.add(e.clientY < r.top + r.height / 2 ? 'ins-before' : 'ins-after'); }
+    return;
+  }
+  if (n) n.classList.add('drop');
+  if (hasFiles(e)) $('#dropmsg').textContent = n ? `Drop into ${folders.find(f => f.id === n.dataset.v).name}` : isFolder(view) ? `Drop into ${folders.find(f => f.id === view).name}` : 'Drop — Stash will read it and file it for you';
+});
+addEventListener('drop', e => {
+  e.preventDefault(); depth = 0; dropall.classList.remove('show'); $('#sortv').classList.remove('over');
+  const n = e.target.closest?.('[data-drop]');
+  if (dragFolder){
+    const t = e.target.closest?.('.nav[data-drop]'), f = folders.find(x => x.id === dragFolder);
+    if (t && t.dataset.v !== dragFolder){
+      const before = t.classList.contains('ins-before');
+      folders.splice(folders.indexOf(f), 1);
+      const at = folders.findIndex(x => x.id === t.dataset.v);
+      folders.splice(before ? at : at + 1, 0, f);
+      toast('Folders reordered');
+    }
+    dragFolder = null; clearDrop(); render(); return;
+  }
+  clearDrop();
+  if (dragId && n){
+    const it = items.find(i => i.id === dragId); if (it.folder !== n.dataset.v) Sorter.learn(it, it.folder, n.dataset.v, 'moved'); it.folder = n.dataset.v; dragId = null;
+    toast(`Moved to ${folders.find(f => f.id === it.folder).name}`); render(); return;
+  }
+  if (e.dataTransfer.files.length) addFiles([...e.dataTransfer.files], n ? n.dataset.v : (isFolder(view) ? view : null));
+});
+
+/* window controls: minimise to island / expand */
+const app = $('#app'), island = $('#island');
+const toIsland = () => { app.classList.add('hidden'); island.classList.add('show'); };
+const fromIsland = () => { app.classList.remove('hidden'); island.classList.remove('show'); };
+$('#close').onclick = toIsland; $('#mini').onclick = toIsland;
+$('#zoom').onclick = () => app.classList.toggle('big');
+island.addEventListener('click', e => { if (e.target.closest('#iadd')){ fromIsland(); newNote(); } else fromIsland(); });
+
+addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); $('#q').focus(); }
+  if (e.key === 'Escape'){ if (open) closeItem(); else if (document.activeElement === $('#q')){ $('#q').value = ''; query = ''; renderGrid(); $('#q').blur(); } }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n'){ e.preventDefault(); newNote(); }
+});
+
+/* =========================================================
+   7. Ask Stash — an agent that learns from the library.
+      • Local mode (default): builds a search index of every
+        item (titles, notes, document text, folders, dates) and
+        answers from it, always citing the items it used.
+      • Claude mode: with the user's own API key, sends the
+        library as context and streams real answers back.
+      The index rebuilds whenever the library changes.
+   ========================================================= */
+const Agent = (() => {
+  const STOP = new Set('a an and are as at be been but by can could did do does for from get got had has have how i if in into is it its just me my of on or our so than that the their them then there these they this to too us was we were what whats when where which who why will with would you your yours tell show find give list about any all some please know'.split(' '));
+  const tok = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 1 && !STOP.has(w));
+  const fname = it => folders.find(f => f.id === it.folder)?.name || '';
+  const fullText = it => [it.link, it.body, (it.sections || []).map(([h, p]) => `${h}: ${p}`).join('\n'), it.text].filter(Boolean).join('\n');
+  let docs = [], idf = new Map(), words = 0, history = [], busy = false;
+  let apiKey = '', model = 'claude-sonnet-4-5';
+
+  function reindex(){
+    docs = items.map(it => {
+      const body = fullText(it);
+      const toks = tok([it.title, it.title, body, fname(it), KIND[it.type], it.ext, it.fname].join(' '));
+      const tf = new Map(); toks.forEach(w => tf.set(w, (tf.get(w) || 0) + 1));
+      return {it, body, tf, title: tok(it.title), len: toks.length || 1};
+    });
+    idf = new Map();
+    docs.forEach(d => d.tf.forEach((_, w) => idf.set(w, (idf.get(w) || 0) + 1)));
+    idf.forEach((n, w) => idf.set(w, Math.log(1 + docs.length / n)));
+    words = docs.reduce((a, d) => a + (d.body.match(/\S+/g) || []).length + d.title.length, 0);
+    renderStats();
+  }
+  function search(q){
+    const qt = tok(q); if (!qt.length) return [];
+    return docs.map(d => {
+      let s = 0;
+      qt.forEach(w => {
+        // exact + prefix matches ("plan" ↔ "planning")
+        d.tf.forEach((c, k) => { if (k === w) s += c * (idf.get(k) || 1); else if (w.length > 3 && (k.startsWith(w) || w.startsWith(k)) && k.length > 3) s += .5 * c * (idf.get(k) || 1); });
+        if (d.title.includes(w)) s += 3;
+      });
+      return {d, s: s / Math.sqrt(d.len)};
+    }).filter(x => x.s > 0).sort((a, b) => b.s - a.s);
+  }
+  const lines = d => d.body.split(/\n+/).map(x => x.trim()).filter(Boolean);
+  function bestLines(d, q, n = 3){
+    const qt = tok(q), L = lines(d);
+    const scored = L.map(l => ({l, s: qt.filter(w => l.toLowerCase().includes(w)).length}));
+    const hit = scored.filter(x => x.s).sort((a, b) => b.s - a.s).slice(0, n).map(x => x.l);
+    return hit.length ? hit : L.slice(0, n);
+  }
+  const listLine = it => `- **${it.title || 'Untitled'}** — ${KIND[it.type]}${it.ext ? ' · ' + it.ext : ''}, ${fname(it)}, ${fmtDate(it.t)}`;
+
+  // ---------- local answers ----------
+  function localAnswer(q){
+    const ql = q.toLowerCase();
+    const folder = folders.find(f => ql.includes(f.name.toLowerCase()) || ql.includes(f.name.toLowerCase().replace(/s$/, '')));
+    const type = /\bnotes?\b/.test(ql) ? 'note' : /\b(docs?|documents?|pdfs?|files?)\b/.test(ql) ? 'doc' : /\b(images?|photos?|pictures?)\b/.test(ql) ? 'image' : /\b(videos?|clips?)\b/.test(ql) ? 'video' : null;
+    if (/\b(how many|count|number of|total)\b/.test(ql)){
+      const by = t => items.filter(i => i.type === t).length;
+      if (folder){ const n = items.filter(i => i.folder === folder.id).length; return {text: `**${folder.name}** has ${n} item${n === 1 ? '' : 's'}.`, src: items.filter(i => i.folder === folder.id).slice(0, 6)}; }
+      if (type){ const n = by(type); return {text: `You have ${n} ${KIND[type].toLowerCase()}${n === 1 ? '' : 's'} saved.`, src: items.filter(i => i.type === type).slice(0, 6)}; }
+      return {text: `Your stash has **${items.length} items** across ${folders.length} folders:\n` + ['note','doc','image','video'].map(t => `- ${by(t)} ${KIND[t].toLowerCase()}s`).join('\n'), src: []};
+    }
+    if (/\b(recent|latest|newest|last added|lately|this week)\b/.test(ql) && !search(q.replace(/recent|latest|newest|this week/gi, '')).length){
+      const r = [...items].sort((a, b) => b.t - a.t).slice(0, 5);
+      return {text: 'Here are the most recent things you added:\n' + r.map(listLine).join('\n'), src: r};
+    }
+    if (/\b(starred|favorites?|favourites?|important)\b/.test(ql)){
+      const r = items.filter(i => i.star);
+      return {text: r.length ? `You've starred ${r.length} item${r.length === 1 ? '' : 's'}:\n` + r.map(listLine).join('\n') : "You haven't starred anything yet.", src: r};
+    }
+    if (folder && /\b(what'?s in|whats in|inside|list|show|contents?|everything in|in my)\b/.test(ql)){
+      const r = items.filter(i => i.folder === folder.id).sort((a, b) => b.t - a.t);
+      return {text: r.length ? `**${folder.name}** has ${r.length} item${r.length === 1 ? '' : 's'}:\n` + r.map(listLine).join('\n') : `**${folder.name}** is empty right now.`, src: r.slice(0, 6)};
+    }
+    let hits = search(q);
+    if (type && !folder) hits = hits.filter(h => h.d.it.type === type).concat(hits.filter(h => h.d.it.type !== type));
+    if (!hits.length){
+      if (type){ const r = items.filter(i => i.type === type); return {text: `I couldn't match that exactly, but here are your ${KIND[type].toLowerCase()}s:\n` + r.map(listLine).join('\n'), src: r.slice(0, 6)}; }
+      return {text: "I couldn't find anything about that in your stash yet. Try different words, or add a note about it and ask again.", src: []};
+    }
+    const top = hits.slice(0, 3).filter((h, k) => k === 0 || h.s > hits[0].s * .35);
+    if (/\b(summar|overview|tl;?dr|recap|explain)\w*/.test(ql)){
+      const d = top[0].d, L = lines(d);
+      return {text: `**${d.it.title}** (${KIND[d.it.type]} in ${fname(d.it)})\n` + (L.length ? L.slice(0, 6).map(l => '- ' + l).join('\n') : 'There is no text inside this one to summarise, only the file itself.'), src: [d.it]};
+    }
+    const parts = top.map(({d}) => {
+      const L = bestLines(d, q);
+      return `**${d.it.title}** — ${KIND[d.it.type]} in ${fname(d.it)}` + (L.length ? '\n' + L.map(l => '- ' + l).join('\n') : '');
+    });
+    return {text: (top.length > 1 ? 'Here is what I found in your stash:\n\n' : '') + parts.join('\n\n'), src: top.map(h => h.d.it)};
+  }
+
+  // ---------- Claude answers (user's own key) ----------
+  function libraryContext(){
+    let out = '', budget = 60000;
+    for (const d of docs){
+      const it = d.it;
+      let block = `[[${it.id}]] "${it.title || 'Untitled'}" — ${KIND[it.type]}${it.ext ? ' (' + it.ext + ')' : ''}, folder: ${fname(it)}, added ${fmtDate(it.t)}${it.star ? ', starred' : ''}${it.dur ? ', length ' + it.dur : ''}${it.size ? ', ' + fmtSize(it.size) : ''}\n`;
+      if (d.body) block += d.body.slice(0, 4000) + '\n';
+      block += '\n';
+      if (block.length > budget) break;
+      out += block; budget -= block.length;
+    }
+    return out;
+  }
+  async function imageBlocks(){
+    // the most recent images you uploaded are sent so Claude can actually see them
+    const imgs = items.filter(i => i.type === 'image' && i.url).slice(0, 4), out = [];
+    for (const it of imgs){
+      try {
+        const im = await new Promise((res, rej) => { const x = new Image(); x.onload = () => res(x); x.onerror = rej; x.src = it.src || it.url; });
+        const k = Math.min(1, 768 / Math.max(im.width, im.height)), c = document.createElement('canvas');
+        c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+        c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+        out.push({type: 'text', text: `Image [[${it.id}]] "${it.title}":`}, {type: 'image', source: {type: 'base64', media_type: 'image/jpeg', data: c.toDataURL('image/jpeg', .8).split(',')[1]}});
+      } catch (e) {}
+    }
+    return out;
+  }
+  async function claudeAnswer(q, onText){
+    const system = `You are Stash, the user's personal assistant inside their Stash app (a library of their notes, documents, images and videos). Answer using the library below. Be concise and direct. When you use an item, cite it with its tag exactly like [[id]]. If the library doesn't contain the answer, say so plainly, then help from general knowledge if that's useful and say that you are doing so.\n\nLIBRARY (${items.length} items, ${folders.length} folders: ${folders.map(f => f.name).join(', ')}):\n\n${libraryContext()}`;
+    const imgs = await imageBlocks();
+    const msgs = history.slice(-10).map(m => ({role: m.role, content: m.content}));
+    msgs.push({role: 'user', content: imgs.length ? [...imgs, {type: 'text', text: q}] : q});
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true'},
+      body: JSON.stringify({model, max_tokens: 1200, system, messages: msgs, stream: true})
+    });
+    if (!res.ok){ let m = res.status + ''; try { m = (await res.json()).error?.message || m; } catch (e) {} throw new Error(m); }
+    const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '', full = '';
+    for (;;){
+      const {done, value} = await reader.read(); if (done) break;
+      buf += dec.decode(value, {stream: true});
+      const ev = buf.split('\n'); buf = ev.pop();
+      for (const line of ev){
+        if (!line.startsWith('data:')) continue;
+        try { const j = JSON.parse(line.slice(5)); if (j.type === 'content_block_delta' && j.delta?.text){ full += j.delta.text; onText(full); } } catch (e) {}
+      }
+    }
+    return full;
+  }
+
+  // ---------- UI ----------
+  const SPARK = svg('spark');
+  const fmt = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^- /gm, '• ');
+  function splitCites(text){
+    const ids = []; const clean = text.replace(/\s*\[\[([a-z0-9]+)\]\]/g, (_, id) => { if (!ids.includes(id)) ids.push(id); return ''; });
+    return {clean, src: ids.map(id => items.find(i => i.id === id)).filter(Boolean)};
+  }
+  const srcHTML = src => src.length ? `<div class="srcs">${src.map(it => `<button class="src" data-id="${it.id}">${svg(it.type)}${esc(it.title || 'Untitled')}</button>`).join('')}</div>` : '';
+  function addMsg(role, html, cls = ''){
+    const el = document.createElement('div'); el.className = `msg ${role} ${cls}`;
+    el.innerHTML = role === 'ai' ? `<div class="who">${SPARK}Stash${apiKey ? ' · Claude' : ' · local'}</div><div class="body">${html}</div>` : html;
+    $('#msgs').appendChild(el); $('#agent').classList.add('chatting');
+    const sc = $('#agscroll'); sc.scrollTop = sc.scrollHeight; return el;
+  }
+  async function ask(q){
+    q = q.trim(); if (!q || busy) return;
+    busy = true; $('#agsend').disabled = true; $('#agin').value = ''; grow();
+    addMsg('user', esc(q));
+    const el = addMsg('ai', '<span class="typing"><i></i><i></i><i></i></span>'), body = el.querySelector('.body'), sc = $('#agscroll');
+    try {
+      if (apiKey){
+        const full = await claudeAnswer(q, t => { body.innerHTML = fmt(splitCites(t).clean); sc.scrollTop = sc.scrollHeight; });
+        const {clean, src} = splitCites(full);
+        body.innerHTML = fmt(clean) + srcHTML(src);
+        history.push({role: 'user', content: q}, {role: 'assistant', content: full});
+      } else {
+        await new Promise(r => setTimeout(r, 450));
+        const {text, src} = localAnswer(q);
+        // type it out so it feels alive
+        for (let i = 0; i <= text.length; i += 6){ body.innerHTML = fmt(text.slice(0, i)); sc.scrollTop = sc.scrollHeight; await new Promise(r => setTimeout(r, 12)); }
+        body.innerHTML = fmt(text) + srcHTML(src);
+        history.push({role: 'user', content: q}, {role: 'assistant', content: text});
+      }
+    } catch (e){
+      el.classList.add('err');
+      body.innerHTML = esc(`Couldn't reach Claude: ${e.message}. Check your key and model name, or switch back to local mode.`);
+    }
+    sc.scrollTop = sc.scrollHeight; busy = false; $('#agsend').disabled = false; $('#agin').focus();
+  }
+  function renderStats(){
+    if (!$('#agstats')) return;
+    $('#agstats').innerHTML = `
+      <span class="stat"><svg viewBox="0 0 24 24"><defs><linearGradient id="sg1" x1="3" y1="2" x2="14" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff" stop-opacity=".38"/><stop offset="1" stop-color="#3a3a3a" stop-opacity=".62"/></linearGradient><linearGradient id="sg2" x1="3" y1="2" x2="14" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#3a3a3a" stop-opacity=".38"/><stop offset="1" stop-color="#fff" stop-opacity=".62"/></linearGradient></defs><rect x="3.4" y="2.6" width="7.2" height="18.8" rx="3.6" fill="url(#sg1)"/><rect x="13.4" y="2.6" width="7.2" height="18.8" rx="3.6" fill="url(#sg2)"/><rect x="9.2" y="10.9" width="5.6" height="2.2" rx="1.1" fill="#4a4a4a"/></svg>${items.length} items learned</span>
+      <span class="stat"><svg viewBox="0 0 24 24"><rect x="2.4" y="2.4" width="19.2" height="19.2" rx="6.2" fill="#fff"/><path d="M12 7.1v7.4M8.15 12.35L12 16.2l3.85-3.85" stroke="#111" stroke-width="1.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>${words.toLocaleString()} words indexed</span>
+      <span class="stat"><svg viewBox="0 0 24 24" fill="none" stroke="#e8e8e8" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>${folders.length} folders connected</span>`;
+  }
+  const PILLS = ["What's on my plan this week?", 'Summarize the contract draft', 'What ideas have I saved?', "What's in Launch Project?", 'How many images do I have?'];
+  $('#pills').innerHTML = PILLS.map((p, k) => `<button class="pill" style="animation-delay:${.55 + k * .1}s">${esc(p)}</button>`).join('');
+  $('#pills').addEventListener('click', e => { const b = e.target.closest('.pill'); if (b) ask(b.textContent); });
+  const grow = () => { const t = $('#agin'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight) + 'px'; };
+  $('#agin').addEventListener('input', grow);
+  $('#agin').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); ask($('#agin').value); } });
+  $('#agform').addEventListener('submit', e => { e.preventDefault(); ask($('#agin').value); });
+  $('#msgs').addEventListener('click', e => { const s = e.target.closest('.src'); if (s){ const it = items.find(i => i.id === s.dataset.id); if (it) openItem(it); } });
+  $('#agNew').onclick = () => { history = []; $('#msgs').innerHTML = ''; $('#agent').classList.remove('chatting'); $('#agin').focus(); };
+  const setStatus = () => { const st = $('#agstatus'); st.classList.toggle('on', !!apiKey); st.querySelector('span').textContent = apiKey ? `Claude · ${model}` : 'Local mode'; $('#agConnect').textContent = apiKey ? 'Settings' : 'Connect Claude'; };
+  $('#agConnect').onclick = () => { $('#keyin').value = apiKey; $('#modelin').value = model; $('#keybox').classList.add('show'); setTimeout(() => $('#keyin').focus(), 50); };
+  $('#keyform').addEventListener('submit', e => { e.preventDefault(); apiKey = $('#keyin').value.trim(); model = $('#modelin').value.trim() || model; $('#keybox').classList.remove('show'); setStatus(); toast(apiKey ? 'Claude connected' : 'Using local mode'); });
+  $('#keyOff').onclick = () => { apiKey = ''; $('#keybox').classList.remove('show'); setStatus(); };
+  $('#keybox').addEventListener('click', e => { if (e.target.id === 'keybox') $('#keybox').classList.remove('show'); });
+
+  const vid = $('#agvid');
+  function show(){ vid.play().catch(() => {}); setTimeout(() => { if (!$('#agent').classList.contains('chatting')) $('#agin').focus(); }, 100); }
+  function hide(){ vid.pause(); }
+  const goAsk = () => { if (open) closeItem(); view = 'agent'; render(); };
+  $('#askTop').onclick = goAsk;
+  addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j'){ e.preventDefault(); goAsk(); } });
+  return {reindex, show, hide, ask, creds: () => ({apiKey, model})};
+})();
+
+/* =========================================================
+   8. Smart Sort — drop files in, Stash reads them and files
+      them into the right folder (or proposes a new one).
+      It learns from you: every time you file, correct or move
+      something, that becomes a "lesson" it uses next time.
+      • On-device: reads text/markdown/CSV/JSON, PDFs (pdf.js)
+        and Word docs (mammoth), then matches against what each
+        folder already holds + past lessons.
+      • With Claude connected: Claude reads the file (and sees
+        images) and picks the folder, using the same lessons.
+   ========================================================= */
+const Sorter = (() => {
+  const STOP = new Set('a an and are as at be by for from has have i in is it its of on or that the this to was were will with you your our we me my not but so if then than there their they them these those do does did can could would should into about over under after before more most some any all each other such only own same very just also new img image file final copy version untitled document scan screenshot screen shot photo video pdf doc docx txt png jpg jpeg heic mov mp4 www com http https'.split(' '));
+  const split = s => String(s || '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_\-.]+/g, ' ');
+  const tok = s => split(s).toLowerCase().normalize('NFKD').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !STOP.has(w) && !/^\d+$/.test(w));
+  let lessons = [], queue = [], autoFile = true, seq = 0, lastFiled = null;
+  const subs = [], emit = () => subs.forEach(fn => fn());
+
+  // ---------- reading files ----------
+  const loaded = {};
+  const loadScript = src => loaded[src] || (loaded[src] = new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); }));
+  async function pdfText(f){
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    const doc = await pdfjsLib.getDocument({data: await f.arrayBuffer()}).promise;
+    let out = '';
+    for (let p = 1; p <= Math.min(doc.numPages, 8); p++){ const c = await (await doc.getPage(p)).getTextContent(); out += c.items.map(i => i.str).join(' ') + '\n'; }
+    return out;
+  }
+  async function docxText(f){
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');
+    return (await mammoth.extractRawText({arrayBuffer: await f.arrayBuffer()})).value;
+  }
+  const videoDur = f => new Promise(res => {
+    const v = document.createElement('video'), u = URL.createObjectURL(f); v.preload = 'metadata';
+    v.onloadedmetadata = () => { const d = v.duration; URL.revokeObjectURL(u); res(isFinite(d) ? `${Math.floor(d / 60)}:${String(Math.round(d % 60)).padStart(2, '0')}` : ''); };
+    v.onerror = () => res(''); v.src = u; setTimeout(() => res(''), 4000);
+  });
+  async function read(f){
+    const ext = (f.name.split('.').pop() || '').toLowerCase();
+    const type = f.type.startsWith('image/') ? 'image' : f.type.startsWith('video/') ? 'video' : 'doc';
+    let text = '', dur = '';
+    try {
+      if (/^text\/|json|xml|csv/.test(f.type) || ['md', 'txt', 'csv', 'json', 'html', 'htm', 'rtf', 'log'].includes(ext)) text = await f.text();
+      else if (ext === 'pdf') text = await pdfText(f);
+      else if (ext === 'docx') text = await docxText(f);
+      else if (type === 'video') dur = await videoDur(f);
+    } catch (e) { /* unreadable → sort by name and type only */ }
+    let full = null, thumb = null, poster = null;
+    try {
+      if (type === 'image'){ full = await fileToDataURL(f); thumb = await imageThumb(full).catch(() => full); }
+      else if (type === 'video'){ if (f.size < 80e6) full = await fileToDataURL(f); poster = await videoPoster(full || URL.createObjectURL(f)); }
+      else if (window.stashNative && f.size < 60e6) full = await fileToDataURL(f);   // Mac app: keep the file so it's still there next launch
+    } catch (e) {}
+    text = text.replace(/\s+\n/g, '\n').slice(0, 200000);
+    const nameT = tok(f.name.replace(/\.[^.]+$/, ''));
+    const tokens = [...nameT, ...nameT, ...tok(text.slice(0, 20000)).slice(0, 1500), 'type:' + type, 'ext:' + ext];
+    return {name: f.name, title: f.name.replace(/\.[^.]+$/, ''), ext, type, text, dur, tokens, nameT, full, thumb, poster};
+  }
+
+  // ---------- on-device matching ----------
+  const itemTokens = it => [...tok(it.title), ...tok(it.title), ...tok([it.body, it.text, it.link, (it.sections || []).map(x => x.join(' ')).join(' ')].filter(Boolean).join(' ').slice(0, 6000)).slice(0, 400), 'type:' + it.type, 'ext:' + String(it.ext || '').toLowerCase()];
+  const jac = (a, b) => { const A = new Set(a), B = new Set(b); let i = 0; A.forEach(x => B.has(x) && i++); return i / (A.size + B.size - i || 1); };
+  function suggestLocal(feat){
+    if (!folders.length) return {folder: '__new:Unsorted', conf: .5, reason: 'You have no folders yet'};
+    const profiles = folders.map(f => {
+      const its = items.filter(i => i.folder === f.id), les = lessons.filter(l => l.to === f.id);
+      const vec = new Map(), add = (t, w) => vec.set(t, (vec.get(t) || 0) + w);
+      const nameT = tok(f.name);
+      nameT.forEach(t => add(t, 3));
+      const itT = its.map(i => ({it: i, t: itemTokens(i)}));
+      itT.forEach(x => x.t.forEach(t => add(t, 1)));
+      les.forEach(l => l.tokens.forEach(t => add(t, l.kind === 'moved' ? 2.5 : 1.5)));
+      return {f, its, les, vec, nameT, itT};
+    });
+    const df = new Map(); profiles.forEach(p => p.vec.forEach((_, t) => df.set(t, (df.get(t) || 0) + 1)));
+    const idf = t => Math.log(1 + profiles.length / (df.get(t) || .5));
+    const fv = new Map(); feat.tokens.forEach(t => fv.set(t, (fv.get(t) || 0) + 1));
+    let fn = 0; fv.forEach((c, t) => fn += (c * idf(t)) ** 2); fn = Math.sqrt(fn) || 1;
+    const scored = profiles.map(p => {
+      let dot = 0, pn = 0, shared = [];
+      p.vec.forEach((c, t) => { const w = c * idf(t); pn += w * w; if (fv.has(t)){ dot += w * fv.get(t) * idf(t); if (!t.includes(':')) shared.push([t, w]); } });
+      let score = dot / (fn * (Math.sqrt(pn) || 1));
+      const nameHit = p.nameT.find(t => feat.tokens.includes(t));
+      if (nameHit) score += .3;
+      // files with no readable text (photos, videos) lean more on what kind of file each folder usually holds
+      if (p.its.length) score += (feat.text ? .12 : .3) * p.its.filter(i => i.type === feat.type).length / p.its.length;
+      let bestL = null, bl = 0; p.les.forEach(l => { const j = jac(feat.tokens, l.tokens) * (l.kind === 'moved' ? 1.2 : 1); if (j > bl){ bl = j; bestL = l; } });
+      score += .7 * bl;
+      let near = null, nj = 0; p.itT.forEach(x => { const j = jac(feat.tokens, x.t); if (j > nj){ nj = j; near = x.it; } });
+      shared.sort((a, b) => b[1] - a[1]);
+      return {p, score, nameHit, bestL, bl, near, nj, shared: shared.slice(0, 3).map(x => x[0])};
+    }).sort((a, b) => b.score - a.score);
+    const top = scored[0];
+    if (top.score < .07){
+      const home = isFolder(HOME[feat.type]) ? HOME[feat.type] : folders[0].id;
+      return {folder: home, conf: .45, reason: 'Nothing similar yet — filed by type. Move it and I’ll learn.'};
+    }
+    const ex = scored.map(x => Math.exp(x.score * 9)), sum = ex.reduce((a, b) => a + b, 0);
+    const conf = Math.min(.98, ex[0] / sum + (top.bl > .45 ? .15 : 0));
+    const reason = top.bl > .3 ? `You filed “${top.bestL.title}” here before`
+      : top.nameHit ? `Mentions “${top.nameHit}”, like the folder name`
+      : top.nj > .12 ? `Similar to “${top.near.title}”`
+      : top.shared.length ? `Shares words: ${top.shared.join(', ')}`
+      : `Most ${KIND[feat.type].toLowerCase()}s live here`;
+    return {folder: top.p.f.id, conf, reason};
+  }
+
+  // ---------- Claude matching (when connected) ----------
+  async function suggestClaude(feat, file){
+    const {apiKey, model} = Agent.creds();
+    const flist = folders.map(f => `- id "${f.id}": ${f.name} — e.g. ${items.filter(i => i.folder === f.id).slice(0, 6).map(i => `"${i.title}"`).join(', ') || '(empty)'}`).join('\n');
+    const les = lessons.slice(-25).map(l => `- "${l.title}" (${l.type}) → ${folders.find(f => f.id === l.to)?.name || 'deleted folder'}${l.kind === 'moved' ? ' (user moved it here)' : ''}`).join('\n') || '(none yet)';
+    const content = [];
+    if (feat.type === 'image' && file){
+      try {
+        const u = URL.createObjectURL(file), im = await new Promise((r, j) => { const x = new Image(); x.onload = () => r(x); x.onerror = j; x.src = u; });
+        const k = Math.min(1, 640 / Math.max(im.width, im.height)), c = document.createElement('canvas'); c.width = im.width * k; c.height = im.height * k;
+        c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(u);
+        content.push({type: 'image', source: {type: 'base64', media_type: 'image/jpeg', data: c.toDataURL('image/jpeg', .75).split(',')[1]}});
+      } catch (e) {}
+    }
+    content.push({type: 'text', text: `FOLDERS:\n${flist}\n\nPAST FILING DECISIONS (learn the user's habits from these):\n${les}\n\nNEW FILE: "${feat.name}" (${feat.type}${feat.dur ? ', ' + feat.dur : ''}, ${fmtSize(file?.size)})\nCONTENT:\n${feat.text.slice(0, 3500) || '(no readable text)'}\n\nReply with JSON only: {"folder_id": "<existing id or null>", "new_folder": "<short name or null>", "title": "<clean human title>", "confidence": 0-1, "reason": "<max 12 words>"}. Prefer an existing folder; only propose a new folder if nothing fits.`});
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true'},
+      body: JSON.stringify({model, max_tokens: 300, system: 'You file items into the user\'s folders in their personal library app. Follow their past decisions closely.', messages: [{role: 'user', content}]})
+    });
+    if (!res.ok) throw new Error(res.status);
+    const txt = (await res.json()).content?.map(c => c.text || '').join('') || '';
+    const j = JSON.parse(txt.slice(txt.indexOf('{'), txt.lastIndexOf('}') + 1));
+    const folder = j.folder_id && isFolder(j.folder_id) ? j.folder_id : j.new_folder ? '__new:' + String(j.new_folder).slice(0, 40) : null;
+    if (!folder) throw new Error('no folder');
+    return {folder, conf: Math.max(0, Math.min(1, +j.confidence || .6)), reason: j.reason || 'Chosen by Claude', title: j.title};
+  }
+
+  // ---------- learning ----------
+  function learn(it, from, to, kind){
+    if (!to || from === to) return;
+    const tokens = itemTokens(it);
+    lessons.push({id: uid(), title: it.title || it.fname || 'Untitled', type: it.type, tokens, from, to, kind, t: Date.now()});
+    if (lessons.length > 300) lessons.shift();
+    if (kind === 'moved' || kind === 'corrected'){
+      const f = folders.find(f => f.id === to);
+      toast(`Got it — files like “${(it.title || '').slice(0, 24)}” go in ${f?.name} from now on`);
+    }
+    renderLessons();
+  }
+
+  // ---------- tray ----------
+  const tray = $('#tray');
+  function intake(files){
+    const list = [...files]; if (!list.length) return;
+    tray.classList.remove('learn'); if (!tray.classList.contains('docked')) tray.classList.add('show');
+    list.forEach(file => {
+      const q = {id: ++seq, file, status: 'reading', preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : null};
+      queue.push(q); process(q);
+    });
+    renderTray();
+  }
+  async function process(q){
+    q.feat = await read(q.file);
+    q.preview = q.feat.thumb || q.feat.poster || q.preview;
+    const {apiKey} = Agent.creds();
+    try { q.sug = apiKey ? await suggestClaude(q.feat, q.file) : suggestLocal(q.feat); q.by = apiKey ? 'claude' : 'local'; }
+    catch (e) { q.sug = suggestLocal(q.feat); q.by = 'local'; }
+    q.choice = q.sug.folder; q.status = 'ready';
+    if (autoFile && q.sug.conf >= .7) file(q, true); else { renderTray(); window.stashNative?.status(`“${q.file.name}” needs a folder — open Stash to choose`, true); }
+  }
+  function resolveFolder(choice){
+    if (!choice.startsWith('__new:')) return choice;
+    const name = choice.slice(6) || 'New Folder';
+    const ex = folders.find(f => f.name.toLowerCase() === name.toLowerCase()); if (ex) return ex.id;
+    const f = {id: 'f-' + uid(), name, icon: 'folder'}; folders.push(f); return f.id;
+  }
+  function file(q, auto){
+    if (q.status !== 'ready') return;
+    const folder = resolveFolder(q.choice);
+    const it = makeItem(q.file, q.feat); it.folder = folder;
+    if (q.sug.title && q.by === 'claude') it.title = q.sug.title;
+    items.unshift(it); q.item = it; q.status = 'filed'; q.auto = auto; lastFiled = q;
+    window.stashNative?.status(`Filed “${it.title}” in ${folders.find(f => f.id === folder)?.name}`);
+    const corrected = q.choice !== q.sug.folder;
+    learn(it, corrected ? resolveFolderQuiet(q.sug.folder) : null, folder, corrected ? 'corrected' : 'accepted');
+    render(); renderTray();
+  }
+  const resolveFolderQuiet = c => c.startsWith('__new:') ? null : c;
+  function undo(q){
+    if (q.status !== 'filed') return;
+    items = items.filter(i => i !== q.item);
+    lessons = lessons.filter(l => !(l.title === (q.item.title || q.item.fname) && l.to === q.item.folder && Date.now() - l.t < 6e5));
+    q.status = 'ready'; q.item = null; render(); renderTray(); renderLessons();
+  }
+  const fname = id => id.startsWith('__new:') ? id.slice(6) : folders.find(f => f.id === id)?.name || '?';
+  function renderTray(){
+    setTimeout(emit);
+    const pending = queue.filter(q => q.status !== 'filed').length, done = queue.length - pending;
+    $('#trayTitle').textContent = pending ? `Sorting ${pending} file${pending === 1 ? '' : 's'}…` : queue.length ? `Filed ${done} file${done === 1 ? '' : 's'}` : 'Smart Sort';
+    $('#trayMode').textContent = Agent.creds().apiKey ? 'Using Claude' : 'On-device';
+    $('#trayAll').disabled = !queue.some(q => q.status === 'ready');
+    $('#trows').innerHTML = queue.length ? queue.slice().reverse().map(q => {
+      const icon = q.file.type.startsWith('video/') ? 'video' : q.file.type.startsWith('image/') ? 'image' : 'doc';
+      const th = `<div class="tth" ${q.preview ? `style="background-image:url('${q.preview}')"` : ''}>${q.preview ? '' : svg(icon)}</div>`;
+      if (q.status === 'reading') return `<div class="trow">${th}<div class="tm"><div class="tn">${esc(q.file.name)}</div><div class="ts"><span class="reading">Reading the file…</span></div></div></div>`;
+      const c = q.sug.conf, cls = c >= .7 ? '' : c >= .5 ? 'mid' : 'low';
+      if (q.status === 'filed') return `<div class="trow filed">${th}<div class="tm"><div class="tn">${esc(q.item.title)}</div><div class="ts">✓ ${q.auto ? 'Auto-filed' : 'Filed'} in <b style="color:#fff;font-weight:500">${esc(folders.find(f => f.id === q.item.folder)?.name || '')}</b> · <button class="undo" data-undo="${q.id}">Undo</button></div><div class="why">${q.choice !== q.sug.folder ? 'You picked this folder — I’ll remember for next time' : esc(q.sug.reason)}</div></div></div>`;
+      const opts = folders.map(f => `<option value="${f.id}" ${q.choice === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('')
+        + (q.choice.startsWith('__new:') ? `<option value="${esc(q.choice)}" selected>+ New: ${esc(q.choice.slice(6))}</option>` : '') + '<option value="__ask">+ New folder…</option>';
+      return `<div class="trow">${th}<div class="tm"><div class="tn">${esc(q.file.name)}</div>
+        <div class="ts">→ <select data-pick="${q.id}">${opts}</select><span class="conf ${cls}">${Math.round(c * 100)}%</span><button class="go" data-file="${q.id}">File</button></div>
+        <div class="why">${esc(q.sug.reason)}${q.choice !== q.sug.folder ? ` · you're changing it from ${esc(fname(q.sug.folder))} — I'll remember` : ''}</div></div></div>`;
+    }).join('') : '<div class="lessons" style="display:block"><div class="none">Drop files anywhere in Stash, or use Upload & auto-sort. I’ll read each one and file it.</div></div>';
+  }
+  function renderLessons(){
+    $('#trayLearn').textContent = `Learned (${lessons.length})`;
+    $('#lessons').innerHTML = lessons.length ? lessons.slice().reverse().map(l => `<div class="lesson"><span>“${esc(l.title)}” → <b>${esc(folders.find(f => f.id === l.to)?.name || 'deleted folder')}</b>
+      <small>${l.kind === 'moved' ? `You moved it${l.from ? ' from ' + esc(folders.find(f => f.id === l.from)?.name || '…') : ''}` : l.kind === 'corrected' ? 'You corrected my pick' : l.kind === 'direct' ? 'You put it there yourself' : 'You accepted my pick'} · ${fmtDate(l.t)}</small></span><button data-forget="${l.id}" title="Forget this">×</button></div>`).join('')
+      : '<div class="none">Nothing learned yet. Every time you file, correct or move something, I remember it and get better at sorting.</div>';
+  }
+  $('#trows').addEventListener('change', e => {
+    const s = e.target.closest('[data-pick]'); if (!s) return;
+    const q = queue.find(x => x.id === +s.dataset.pick);
+    if (s.value === '__ask'){
+      dialog(`<h3>New folder</h3><label>Name<input id="dN" placeholder="e.g. Client Work" autocomplete="off"></label><div class="row"><button class="btn" id="dC">Cancel</button><button class="btn w" id="dOk">Create</button></div>`, close => {
+        const go = () => { const n = $('#dN').value.trim(); if (!n) return; q.choice = '__new:' + n; close(); renderTray(); };
+        $('#dC').onclick = () => { close(); renderTray(); }; $('#dOk').onclick = go;
+        $('#dlgbox').onkeydown = e => { if (e.key === 'Enter') go(); };
+        setTimeout(() => $('#dN').focus(), 30);
+      });
+      return;
+    }
+    q.choice = s.value; renderTray();
+  });
+  $('#trows').addEventListener('click', e => {
+    const f = e.target.closest('[data-file]'), u = e.target.closest('[data-undo]');
+    if (f) file(queue.find(q => q.id === +f.dataset.file), false);
+    if (u) undo(queue.find(q => q.id === +u.dataset.undo));
+  });
+  $('#lessons').addEventListener('click', e => { const b = e.target.closest('[data-forget]'); if (b){ lessons = lessons.filter(l => l.id !== b.dataset.forget); renderLessons(); } });
+  $('#trayAll').onclick = () => queue.filter(q => q.status === 'ready').forEach(q => file(q, false));
+  $('#trayClear').onclick = () => { queue = queue.filter(q => q.status !== 'filed'); renderTray(); };
+  $('#trayClose').onclick = () => tray.classList.remove('show');
+  $('#trayLearn').onclick = () => { tray.classList.toggle('learn'); $('#trayLearn').classList.toggle('on'); };
+  $('#autoSw').onclick = () => { autoFile = !autoFile; $('#autoSw').classList.toggle('on', autoFile); };
+  renderLessons();
+  const state = () => ({count: queue.length, pending: queue.filter(q => q.status !== 'filed').length,
+    reading: queue.find(q => q.status === 'reading'), waiting: queue.filter(q => q.status === 'ready').length, last: lastFiled && lastFiled.status === 'filed' ? lastFiled : null});
+  return {read, intake, learn, state, onChange: fn => subs.push(fn), getLessons: () => lessons, setLessons: l => { lessons = Array.isArray(l) ? l : []; renderLessons(); }};
+})();
+
+/* =========================================================
+   9. Smart Sort section — a full landing-style page for the
+      sorter: background video, headline, "Choose Files" CTA,
+      and a glass drop card that shows what's being filed.
+      The sorting queue docks into a glass panel on the right.
+   ========================================================= */
+const SortView = (() => {
+  const el = $('#sortv'), tray = $('#tray'), trayHome = tray.parentElement;
+  let on = false;
+  const pick = () => $('#file').click();
+  function sync(){
+    const st = Sorter.state();
+    el.classList.toggle('has', st.count > 0);
+    tray.classList.toggle('show', st.count > 0);
+  }
+  Sorter.onChange(() => { if (on) sync(); });
+  function show(){ on = true; $('#svbody').appendChild(tray); tray.classList.add('docked'); tray.classList.remove('learn'); sync(); }
+  function hide(){
+    on = false; tray.classList.remove('docked'); trayHome.appendChild(tray);
+    tray.classList.toggle('show', Sorter.state().pending > 0);
+  }
+  $('#svup').onclick = pick;
+  $('#svdz').onclick = pick;
+  return {show, hide, active: () => on};
+})();
+
+/* =========================================================
+   6. Home — "network" page: dot-matrix hands in the middle,
+      folders orbiting around them, linked to the centre.
+      (Hands follow the Kindred dot-matrix spec, recoloured as
+       light dots so they sit on the app's dark gradient.)
+   ========================================================= */
+const Home = (() => {
+  const SHEET = 'https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20261030_025250_100df7b8-31fd-4614-aa4a-c1b7d5b6b273.png&w=1600&q=85';
+  const SRC = {LA:[0,.06,.47,.40], RA:[.53,.06,.47,.40], LB:[0,.55,.47,.40], RB:[.53,.55,.47,.40]};
+  const LOOP = 20, LEVELS = [1, .78, .52, .26];
+  const DOT = 'rgba(238,238,242,.92)';
+  const host = $('#home'), cv = $('#dots'), ctx = cv.getContext('2d');
+  const fA = document.createElement('canvas'), fB = document.createElement('canvas');
+  const xA = fA.getContext('2d', {willReadFrequently: true}), xB = fB.getContext('2d', {willReadFrequently: true});
+  let tiles = null, W = 0, H = 0, DPR = 1, step, rowStep, cols, rows, R, seeds;
+
+  const fract = x => x - Math.floor(x);
+  const hash = (a, b) => fract(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+  const mixAt = (t, on, off, dur) => smooth(on, on + dur, t) * (1 - smooth(off, off + dur, t));
+
+  // 1. load the sheet once and slice it into four pre-downscaled tiles
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    tiles = {};
+    for (const k in SRC){
+      const [x, y, w, h] = SRC[k], sw = w * img.width, sh = h * img.height;
+      const c = document.createElement('canvas'); c.width = 420; c.height = Math.round(420 * sh / sw);
+      const cx = c.getContext('2d'); cx.imageSmoothingQuality = 'high';
+      cx.drawImage(img, x * img.width, y * img.height, sw, sh, 0, 0, c.width, c.height);
+      tiles[k] = c;
+    }
+  };
+  img.onerror = () => console.warn('Stash: could not load the hands image');
+  img.src = SHEET;
+
+  // 2. grid (recomputed on resize)
+  function resize(){
+    W = host.clientWidth; H = host.clientHeight; if (!W || !H) return;
+    host.classList.toggle('tight', W < 760);
+    DPR = Math.min(2, devicePixelRatio || 1);
+    cv.width = W * DPR; cv.height = H * DPR;
+    step = Math.max(5, W / 205); rowStep = step * 2.05;
+    cols = Math.ceil(W / step); rows = Math.ceil(H / rowStep); R = step * .46;
+    fA.width = fB.width = cols; fA.height = fB.height = rows;
+    seeds = new Float32Array(cols * rows);
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) seeds[j * cols + i] = .55 * hash(i, j) + .45 * hash(j * 3.1, 7.7);
+    layout();
+  }
+
+  // 3. hands into the low-res luminance fields
+  function drawHand(x2, tile, left, a){
+    const portrait = H > W, ph = left ? 0 : Math.PI;
+    const hw = W * (portrait ? .66 : .53), hh = hw * (.40 * 1520) / (.47 * 2688), cy = H * (portrait ? .66 : .56);
+    const reach = (.035 * Math.sin(a + ph) + .012 * Math.sin(2 * a + 1.3 + ph)) * W;
+    const sc = 1 + .07 * Math.sin(a + .9 + ph);
+    const rot = (left ? 1 : -1) * .045 * Math.sin(a + 2.1 + ph);
+    const x = left ? reach - W * .045 : W - hw + W * .045 - reach, px = left ? 0 : W;
+    x2.save();
+    x2.setTransform(cols / W, 0, 0, rows / H, 0, 0);
+    x2.translate(px, cy); x2.rotate(rot); x2.scale(sc, sc); x2.translate(-px, -cy);
+    x2.drawImage(tile, x, cy - hh / 2, hw, hh);
+    x2.restore();
+  }
+
+  function renderDots(time){
+    if (!tiles || !cols) { ctx.clearRect(0, 0, cv.width, cv.height); return; }
+    const t = ((time % LOOP) + LOOP) % LOOP, a = 2 * Math.PI * t / LOOP;
+    for (const [x2, L, Rr] of [[xA, tiles.LA, tiles.RA], [xB, tiles.LB, tiles.RB]]){
+      x2.setTransform(1, 0, 0, 1, 0, 0); x2.fillStyle = '#fff'; x2.fillRect(0, 0, cols, rows);
+      drawHand(x2, L, true, a); drawHand(x2, Rr, false, a);
+    }
+    const dA = xA.getImageData(0, 0, cols, rows).data, dB = xB.getImageData(0, 0, cols, rows).data;
+    const mL = mixAt(t, 6.2, 14.6, 1.6), mR = mixAt(t, 2.4, 10.4, 1.6), tick = Math.floor(t * 7);
+    const portrait = H > W, qx = portrait ? .44 : .24, qy = portrait ? .3 : .34, qh = .1;
+
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    ctx.beginPath();
+    for (let j = 0; j < rows; j++){
+      const shift = hash(j, tick) > .965 ? Math.round((hash(tick, j) - .5) * 8) : 0;
+      const y = (j + .5) * rowStep, ey = (y / H - qy) / qh;
+      for (let i = 0; i < cols; i++){
+        const si = clamp(i - shift, 0, cols - 1), seed = seeds[j * cols + i];
+        const m = i < cols / 2 ? mL : mR, d = seed < m ? dB : dA;
+        let v = (1 - d[(j * cols + si) * 4] / 255 - .16) / .42;
+        if (v <= 0) continue; if (v > 1) v = 1;
+        if (m > .001 && m < .999){
+          const df = Math.abs(seed - m);
+          if (df < .12){ v *= df / .12; if (hash(i + tick, j) <= .4) v *= .3; }
+        }
+        v *= .86 + .14 * Math.sin(t * 3.2 + seed * 40);
+        const cx = Math.abs((i + .5) / cols - .5);
+        v *= smooth(.035, .11, cx);
+        v *= smooth(.85, 1.25, Math.hypot(cx / qx, ey));
+        let lev = 0; for (const L of LEVELS) if (v >= L - .13){ lev = L; break; }
+        if (!lev) continue;
+        const r = lev === .26 ? R * .38 : R * lev, x = (i + .5) * step;
+        ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, 6.2832);
+      }
+    }
+    ctx.fillStyle = DOT; ctx.fill();
+  }
+
+  // 4. folder nodes orbiting the centre, linked to the "+ New Note" hub
+  let nodes = [], hub = {x: 0, y: 0};
+  function build(){
+    const nf = folders.length;
+    $('#hsub').textContent = `${items.length} things across ${nf} folders. Drop files anywhere — Stash reads them and files them for you.`;
+    const chip = it => it.type === 'image' || (it.type === 'video' && (it.src || it.poster)) ? `<i style="background-image:url('${it.thumb || it.poster || it.src}')"></i>`
+      : `<i style="background:${it.type === 'note' ? '#f4f1ea' : it.type === 'doc' ? (it.color || '#555') : it.type === 'link' ? `hsl(${hueOf(domainOf(it.link))} 55% 42%)` : '#333'}"></i>`;
+    $('#nodes').innerHTML = folders.map(f => {
+      const list = items.filter(i => i.folder === f.id).sort((a, b) => b.t - a.t);
+      return `<div class="node" data-v="${f.id}" data-drop="1"><span class="ni">${svg(f.icon)}</span>
+        <span><b>${esc(f.name)}</b><small>${list.length} item${list.length === 1 ? '' : 's'}</small></span>
+        ${list.length ? `<span class="stack">${list.slice(0, 3).map(chip).join('')}</span>` : ''}</div>`;
+    }).join('') + `<div class="node add" id="nodeAdd"><span class="ni">${svg('plus')}</span><span><b>New Folder</b></span></div>`;
+    layout();
+  }
+  function layout(){
+    if (!W) return;
+    const els = [...$('#nodes').children], N = els.length;
+    const b = $('#hcta').getBoundingClientRect(), hb = host.getBoundingClientRect();
+    hub = {x: b.left - hb.left + b.width / 2, y: b.top - hb.top + b.height / 2};
+    // two in the top corners, the rest packed into centred rows along the bottom
+    // (a row fills up to the panel width, then a new row starts above it)
+    const sizes = els.map(el => ({w: el.offsetWidth, h: el.offsetHeight}));
+    const top = N > 3 ? 2 : 0, pos = [];
+    if (top){ pos.push([.13 * W, .12 * H], [.87 * W, .12 * H]); }
+    const rest = sizes.slice(top), gap = 14, maxW = W * .94, rowsArr = [[]];
+    let used = 0;
+    rest.forEach((sz, k) => {
+      if (rowsArr[rowsArr.length - 1].length && used + gap + sz.w > maxW){ rowsArr.push([]); used = 0; }
+      used += (rowsArr[rowsArr.length - 1].length ? gap : 0) + sz.w;
+      rowsArr[rowsArr.length - 1].push(k);
+    });
+    rowsArr.forEach((row, r) => {
+      const total = row.reduce((t, k) => t + rest[k].w, 0) + gap * (row.length - 1);
+      let x = (W - total) / 2;
+      const yBase = H * (.86 - r * .13);
+      row.forEach((k, idx) => {
+        const u = row.length === 1 ? .5 : idx / (row.length - 1);
+        pos[top + k] = [x + rest[k].w / 2, yBase - Math.sin(u * Math.PI) * H * .03];
+        x += rest[k].w + gap;
+      });
+    });
+    nodes = els.map((el, k) => {
+      const {w, h} = sizes[k];
+      const x = clamp(pos[k][0], w / 2 + 10, W - w / 2 - 10);
+      const y = clamp(pos[k][1], h / 2 + 10, H - h / 2 - 10);
+      return {el, x, y, w, h, ph: k * 1.7};
+    });
+    $('#links').innerHTML = nodes.map(() => '<path/>').join('') + nodes.map(() => '<circle r="1.6"/>').join('');
+  }
+  function animateNodes(time){
+    const paths = $('#links').querySelectorAll('path'), dots = $('#links').querySelectorAll('circle');
+    nodes.forEach((n, k) => {
+      const bx = n.x + Math.sin(time * .5 + n.ph) * 3, by = n.y + Math.sin(time * .7 + n.ph) * 5;
+      n.el.style.transform = `translate(${bx - n.w / 2}px, ${by - n.h / 2}px)`;
+      const mx = (bx + hub.x) / 2 + (hub.y - by) * .12, my = (by + hub.y) / 2 + (bx - hub.x) * .12;
+      const p = paths[k]; if (!p) return;
+      p.setAttribute('d', `M${bx.toFixed(1)} ${by.toFixed(1)} Q${mx.toFixed(1)} ${my.toFixed(1)} ${hub.x.toFixed(1)} ${hub.y.toFixed(1)}`);
+      const u = (time * .18 + k * .23) % 1, q = 1 - u;         // a little pulse travelling node → hub
+      const px = q * q * bx + 2 * q * u * mx + u * u * hub.x, py = q * q * by + 2 * q * u * my + u * u * hub.y;
+      dots[k].setAttribute('cx', px.toFixed(1)); dots[k].setAttribute('cy', py.toFixed(1));
+      dots[k].setAttribute('opacity', (Math.sin(u * Math.PI) * .8).toFixed(2));
+    });
+  }
+
+  // 5. loop — only runs while Home is on screen
+  const t0 = performance.now();
+  function loop(now){
+    if (view === 'home' && !$('#app').classList.contains('hidden')){
+      const time = (now - t0) / 1000;
+      renderDots(time); animateNodes(time);
+    }
+    requestAnimationFrame(loop);
+  }
+  new ResizeObserver(resize).observe(host);
+  requestAnimationFrame(loop);
+  window.__render = t => renderDots(t);
+
+  // interactions
+  $('#nodes').addEventListener('click', e => {
+    if (e.target.closest('#nodeAdd')) return newFolder();
+    const n = e.target.closest('.node[data-v]'); if (n){ view = n.dataset.v; render(); }
+  });
+  $('#hcta').onclick = () => newNote();
+  return {build, layout};
+})();
+
+/* =========================================================
+   10. Mac app bridge — only active inside the Stash app.
+       • Saves everything (folders, items, files, lessons) to
+         disk and restores it on launch.
+       • Receives files dropped on the menu-bar icon / quick
+         panel and sends them through Smart Sort.
+       • Quick note, quick ask and "open" from the menu bar.
+   ========================================================= */
+const Persist = (() => {
+  const N = window.stashNative; let dirty = false, timer = null;
+  const toBlobURL = d => { try { const [h, b] = d.split(','), mime = h.slice(5).split(';')[0], bin = atob(b), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return URL.createObjectURL(new Blob([a], {type: mime})); } catch (e) { return null; } };
+  function snapshot(){
+    return JSON.stringify({v: 1, folders, lessons: Sorter.getLessons(), items: items.map(({url, ...rest}) => rest)});
+  }
+  function save(){ if (!N || !dirty) return; dirty = false; N.save(snapshot()); }
+  function restore(json){
+    try {
+      const d = JSON.parse(json); if (!d || !Array.isArray(d.items)) return;
+      folders = d.folders; items = d.items; Sorter.setLessons(d.lessons);
+      items.forEach(it => { const src = it.data || (it.vsrc && it.vsrc.startsWith('data:') ? it.vsrc : null) || (it.type === 'image' && it.fname ? it.src : null); if (src) it.url = toBlobURL(src); });
+    } catch (e) { console.warn('Stash: could not restore saved data', e); }
+  }
+  if (N){ timer = setInterval(save, 1500); addEventListener('beforeunload', () => { dirty = true; save(); }); }
+  return {dirty: () => { dirty = true; }, restore, save, native: !!N};
+})();
+
+window.Stash = {
+  recent: () => [...items].sort((a, b) => b.t - a.t).slice(0, 5).map(it => ({id: it.id, title: it.title || 'Untitled', type: it.type, folder: folders.find(f => f.id === it.folder)?.name || '', thumb: it.type === 'image' ? (it.thumb || it.src) : it.poster || (it.type === 'video' ? it.src : null)})),
+  count: () => items.length
+};
+if (window.stashNative){
+  const N = window.stashNative;
+  document.body.classList.add('native');
+  const b64ToFile = f => { const bin = atob(f.data), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return new File([a], f.name, {type: f.type}); };
+  N.onIntake(files => Sorter.intake(files.map(b64ToFile)));
+  N.onQuickNote(text => {
+    const lines = text.trim().split('\n'), title = lines[0].slice(0, 80), body = lines.slice(1).join('\n').trim() || (lines[0].length > 80 ? lines[0] : '');
+    const folder = isFolder('notes') ? 'notes' : (folders[0] || (folders.push({id: 'f-' + uid(), name: 'Unsorted', icon: 'folder'}), folders[0])).id;
+    items.unshift({id: uid(), type: 'note', title, body, t: Date.now(), folder}); render();
+    N.status(`Saved note to ${folders.find(f => f.id === folder).name}`);
+  });
+  N.onAsk(q => { if (open) closeItem(); view = 'agent'; render(); setTimeout(() => Agent.ask(q), 250); });
+  // self-update: a small pill appears when a newer version is on GitHub
+  N.onUpdate?.(info => {
+    let el = document.getElementById('upd');
+    if (!el){ el = document.createElement('div'); el.id = 'upd'; el.className = 'upd'; document.body.appendChild(el); }
+    el.innerHTML = `<i></i><span><b>Stash ${esc(info.version)}</b> is ready${info.notes ? ` <small>· ${esc(info.notes)}</small>` : ''}</span><button class="later">Later</button><button class="go">Restart &amp; Update</button>`;
+    el.classList.add('show');
+    el.querySelector('.go').onclick = () => { el.querySelector('.go').textContent = 'Updating…'; Persist.dirty(); Persist.save(); setTimeout(() => N.installUpdate(), 300); };
+    el.querySelector('.later').onclick = () => el.classList.remove('show');
+  });
+  N.onOpen(target => {
+    if (open) closeItem();
+    const it = items.find(i => i.id === target);
+    if (it){ view = it.folder; render(); openItem(it); }
+    else { view = target || 'home'; render(); }
+  });
+}
+
+if (window.stashNative) window.stashNative.load().then(json => { if (json) Persist.restore(json); render(); }).catch(() => render());
+else render();
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+{
+  "version": "1.1.0",
+  "notes": "Stash now updates itself from GitHub",
+  "files": ["index.html", "quick.html", "main.js", "preload.js", "trayTemplate.png", "trayTemplate@2x.png", "icon.png"]
+}

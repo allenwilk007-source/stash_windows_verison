@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stash Quick Panel</title>
+<style>
+:root{--text:#f2f2f3;--muted:rgba(255,255,255,.52);--faint:rgba(255,255,255,.32);--line:rgba(255,255,255,.09);--line2:rgba(255,255,255,.16)}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:transparent;color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden;user-select:none}
+button,input,textarea{font:inherit;color:inherit;background:none;border:0}
+button{cursor:pointer}
+.panel{position:absolute;inset:0;border-radius:14px;overflow:hidden;border:1px solid var(--line2);display:flex;flex-direction:column;
+  background:radial-gradient(120% 70% at 105% 110%,rgba(220,196,140,.30),rgba(60,110,214,.30) 30%,rgba(25,40,90,.25) 50%,transparent 70%),linear-gradient(rgba(22,22,26,.86),rgba(18,18,22,.9))}
+.grain{position:absolute;inset:0;pointer-events:none;opacity:.5;background-size:160px 160px}
+.panel>*:not(.grain){position:relative}
+header{display:flex;align-items:center;gap:9px;padding:12px 12px 10px 14px}
+.logo{width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,#f6e3ae,#4f86e8)}
+header b{flex:1;font-size:13.5px;font-weight:600;letter-spacing:-.01em}
+header b small{font-weight:400;color:var(--muted);margin-left:6px;font-size:11.5px}
+.hb{height:26px;padding:0 10px;border-radius:7px;font-size:12px;border:1px solid var(--line2)}
+.hb:hover{background:rgba(255,255,255,.08)}
+.hb.solid{background:#fff;color:#111;border-color:#fff;font-weight:600}
+.body{flex:1;overflow:auto;padding:2px 12px 12px;display:flex;flex-direction:column;gap:10px}
+.drop{border:1.5px dashed var(--line2);border-radius:12px;padding:16px 12px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px;transition:border-color .15s,background .15s,transform .15s;cursor:pointer}
+.drop:hover{border-color:rgba(255,255,255,.3);background:rgba(255,255,255,.03)}
+.drop.over{border-color:#7fa6ff;background:rgba(80,120,230,.16);transform:scale(1.015)}
+.drop .di{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:rgba(255,255,255,.08);border:1px solid var(--line2)}
+.drop b{font-size:13px;font-weight:600}
+.drop span{font-size:11.5px;color:var(--muted)}
+.status{font-size:11.5px;color:#9fdcb0;min-height:15px;padding:0 2px;transition:opacity .3s}
+.status.warn{color:#f5c76a}
+.card{border-radius:12px;background:rgba(255,255,255,.045);border:1px solid var(--line);padding:9px 10px}
+.card h6{font-size:10.5px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;display:flex;justify-content:space-between}
+textarea{width:100%;min-height:44px;resize:none;outline:0;font-size:13px;line-height:1.5;user-select:text}
+textarea::placeholder,input::placeholder{color:var(--faint)}
+.row{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:10.5px;color:var(--faint)}
+.ask{display:flex;align-items:center;gap:8px}
+.ask svg{flex:none;opacity:.7}
+.ask input{flex:1;outline:0;font-size:13px;height:24px;user-select:text}
+.rec{display:flex;flex-direction:column;gap:2px}
+.ri{display:flex;align-items:center;gap:9px;padding:5px;border-radius:8px;text-align:left;width:100%}
+.ri:hover{background:rgba(255,255,255,.07)}
+.ri i{width:28px;height:28px;border-radius:6px;flex:none;background:#2a2a30 center/cover;display:grid;place-items:center;font-style:normal;font-size:12px;color:#bbb}
+.ri b{display:block;font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
+.ri small{font-size:10.5px;color:var(--muted)}
+.empty{font-size:12px;color:var(--muted);padding:4px 2px}
+footer{display:flex;justify-content:space-between;align-items:center;padding:8px 14px 10px;border-top:1px solid var(--line);font-size:10.5px;color:var(--faint)}
+footer button{color:var(--faint);font-size:10.5px}
+footer button:hover{color:#fff}
+kbd{font-family:inherit;border:1px solid var(--line2);border-radius:4px;padding:0 4px;font-size:10px}
+</style>
+</head>
+<body>
+<div class="panel">
+  <div class="grain" id="grain"></div>
+  <header>
+    <span class="logo"></span><b>Stash<small id="count"></small></b>
+    <button class="hb solid" id="openBtn">Open</button>
+  </header>
+  <div class="body">
+    <div class="drop" id="drop">
+      <div class="di"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></svg></div>
+      <b>Drop files to sort</b>
+      <span>or click to choose — Stash files them for you</span>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="card">
+      <h6>Quick note</h6>
+      <textarea id="note" placeholder="Jot something down… (first line becomes the title)"></textarea>
+      <div class="row"><span><kbd>⌘</kbd> <kbd>↵</kbd> to save</span><button class="hb" id="saveNote">Save</button></div>
+    </div>
+    <div class="card ask">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.6c.55 0 .88.55 1.08 2.1.62 4.7 1.52 5.6 6.22 6.22 1.55.2 2.1.53 2.1 1.08s-.55.88-2.1 1.08c-4.7.62-5.6 1.52-6.22 6.22-.2 1.55-.53 2.1-1.08 2.1s-.88-.55-1.08-2.1c-.62-4.7-1.52-5.6-6.22-6.22C3.15 12.88 2.6 12.55 2.6 12s.55-.88 2.1-1.08c4.7-.62 5.6-1.52 6.22-6.22.2-1.55.53-2.1 1.08-2.1Z"/></svg>
+      <input id="ask" placeholder="Ask Stash anything…">
+    </div>
+    <div class="card">
+      <h6>Recent <button id="smart" style="color:var(--faint);font-size:10.5px;text-transform:none;letter-spacing:0">Smart Sort →</button></h6>
+      <div class="rec" id="rec"><div class="empty">Nothing yet.</div></div>
+    </div>
+  </div>
+  <footer><span><kbd>⌘</kbd><kbd>⇧</kbd><kbd>S</kbd> opens this anywhere</span><button id="quit">Quit</button></footer>
+</div>
+<script>
+const N = window.stashNative, $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// film grain, same as the app
+(() => { const c = document.createElement('canvas'); c.width = c.height = 160; const x = c.getContext('2d'), d = x.createImageData(160, 160);
+  for (let i = 0; i < d.data.length; i += 4){ const v = Math.random() < .5 ? 0 : 255; d.data[i] = d.data[i+1] = d.data[i+2] = v; d.data[i+3] = Math.random() * (v ? 9 : 14); }
+  x.putImageData(d, 0, 0); $('#grain').style.backgroundImage = `url(${c.toDataURL()})`; })();
+
+// drop zone
+const drop = $('#drop');
+['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, () => drop.classList.remove('over')));
+drop.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files.length) N.dropFiles(e.dataTransfer.files); });
+addEventListener('dragover', e => e.preventDefault()); addEventListener('drop', e => e.preventDefault());
+drop.onclick = () => N.pickFiles();
+
+// status messages from the main app
+let stT;
+N.onStatus(msg => { const s = $('#status'); s.textContent = msg; s.classList.toggle('warn', /needs/.test(msg)); s.style.opacity = 1; clearTimeout(stT); stT = setTimeout(() => s.style.opacity = 0, 5000); refresh(); });
+
+// quick note
+const saveNote = () => { const t = $('#note').value.trim(); if (!t) return; N.quickNote(t); $('#note').value = ''; setTimeout(refresh, 300); };
+$('#saveNote').onclick = saveNote;
+$('#note').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)){ e.preventDefault(); saveNote(); } });
+
+// ask
+$('#ask').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.value.trim()){ N.ask(e.target.value.trim()); e.target.value = ''; } });
+
+// recent items
+const ICON = {note: '✎', doc: '▤', image: '▣', video: '▶', link: '↗'};
+async function refresh(){
+  const r = await N.recent(); if (!r) return;
+  $('#count').textContent = `${r.count} items`;
+  $('#rec').innerHTML = r.items.length ? r.items.map(it => `<button class="ri" data-id="${it.id}"><i ${it.thumb ? `style="background-image:url('${it.thumb}')"` : ''}>${it.thumb ? '' : ICON[it.type] || '•'}</i><span><b>${esc(it.title)}</b><small>${esc(it.folder)}</small></span></button>`).join('') : '<div class="empty">Nothing yet.</div>';
+}
+$('#rec').addEventListener('click', e => { const b = e.target.closest('[data-id]'); if (b) N.open(b.dataset.id); });
+$('#openBtn').onclick = () => N.open('home');
+$('#smart').onclick = () => N.open('sort');
+$('#quit').onclick = () => N.quit();
+addEventListener('keydown', e => { if (e.key === 'Escape') N.hide(); });
+N.onRefresh(() => { refresh(); setTimeout(() => $('#note').focus(), 50); });
+refresh();
+</script>
+</body>
+</html>
