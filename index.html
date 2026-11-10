@@ -1228,7 +1228,16 @@ const Agent = (() => {
   const goAsk = () => { if (open) closeItem(); view = 'agent'; render(); };
   $('#askTop').onclick = goAsk;
   addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j'){ e.preventDefault(); goAsk(); } });
-  return {reindex, show, hide, ask, creds: () => ({apiKey, model})};
+  // used by the ⌘⌥ island: same brain, no chat UI
+  async function answer(q){
+    if (apiKey){
+      const full = await claudeAnswer(q, () => {});
+      history.push({role: 'user', content: q}, {role: 'assistant', content: full});
+      const {clean, src} = splitCites(full); return {text: clean, src};
+    }
+    const r = localAnswer(q); return {text: r.text, src: r.src};
+  }
+  return {reindex, show, hide, ask, answer, creds: () => ({apiKey, model})};
 })();
 
 /* =========================================================
@@ -1728,7 +1737,44 @@ const Persist = (() => {
 
 window.Stash = {
   recent: () => [...items].sort((a, b) => b.t - a.t).slice(0, 5).map(it => ({id: it.id, title: it.title || 'Untitled', type: it.type, folder: folders.find(f => f.id === it.folder)?.name || '', thumb: it.type === 'image' ? (it.thumb || it.src) : it.poster || (it.type === 'video' ? it.src : null)})),
-  count: () => items.length
+  count: () => items.length,
+  // the island (⌘⌥ voice / type bar) sends what you said here: simple commands are done
+  // directly ("make a note…", "create a folder…", "open…"); anything else is answered
+  async command(raw){
+    const say = (text, src = []) => ({text, sources: src.filter(Boolean).slice(0, 4).map(it => ({id: it.id, title: it.title || 'Untitled', folder: folders.find(f => f.id === it.folder)?.name || ''}))});
+    let q = String(raw || '').trim();
+    if (!q) return say("I didn't catch that.");
+    // strip the polite wrapper: "hey stash, can you … for me please?"
+    let core = q.replace(/^(hey|hi|hello|ok|okay|yo)[,!\s]+/i, '').replace(/^stash[,!\s]+/i, '')
+      .replace(/^(can|could|would|will) you( please)?\s+/i, '').replace(/^please\s+/i, '')
+      .replace(/\s*(for me)?\s*(please)?[.?!]*$/i, '').trim();
+    let m;
+    if ((m = core.match(/^(?:make|create|add|write|save|take|jot(?: down)?)\s+(?:me\s+)?(?:a\s+)?(?:new\s+|quick\s+)?note\b[\s:,-]*(?:that says|saying|about|called|titled|to)?\s*([\s\S]*)$/i)) || (m = core.match(/^(?:note|remember)(?: that)?[\s:,-]+([\s\S]+)$/i))){
+      const text = (m[1] || '').trim();
+      if (!text) return say('What should the note say?');
+      const title = text.split(/[.\n]/)[0].slice(0, 60);
+      const folder = isFolder('notes') ? 'notes' : homeFolder('note');
+      const it = {id: uid(), type: 'note', title: title.charAt(0).toUpperCase() + title.slice(1), body: text.length > title.length ? text : '', t: Date.now(), folder};
+      items.unshift(it); render();
+      return say(`Done — saved a note in ${folders.find(f => f.id === folder).name}.`, [it]);
+    }
+    if ((m = core.match(/^(?:make|create|add|start|new)\s+(?:a\s+)?(?:new\s+)?folder\s*(?:called|named|for)?\s*(.*)$/i))){
+      const name = (m[1] || '').trim().replace(/\b\w/g, c => c.toUpperCase()) || 'New Folder';
+      const ex = folders.find(f => f.name.toLowerCase() === name.toLowerCase());
+      if (ex) return say(`You already have a folder called ${ex.name}.`);
+      folders.push({id: 'f-' + uid(), name, icon: 'folder'}); render();
+      return say(`Created a folder called ${name}.`);
+    }
+    if ((m = core.match(/^(?:open|show(?: me)?|go to|take me to)\s+(?:my\s+|the\s+)?(.+)$/i))){
+      const want = m[1].toLowerCase().replace(/ folder$/, '');
+      const f = folders.find(f => f.name.toLowerCase() === want) || folders.find(f => f.name.toLowerCase().includes(want) || want.includes(f.name.toLowerCase()));
+      if (f){ window.__islandOpen = f.id; return {...say(`Opening ${f.name}.`), open: f.id}; }
+      const it = items.find(i => (i.title || '').toLowerCase() === want) || items.find(i => (i.title || '').toLowerCase().includes(want));
+      if (it) return {...say(`Opening “${it.title}”.`, [it]), open: it.id};
+    }
+    const r = await Agent.answer(q);
+    return say(r.text.replace(/\*\*/g, ''), r.src || []);
+  }
 };
 if (window.stashNative){
   const N = window.stashNative;

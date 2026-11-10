@@ -24,5 +24,15 @@ contextBridge.exposeInMainWorld('stashNative', {
   hide: () => ipcRenderer.send('quick:hide'),
   quit: () => ipcRenderer.send('quick:quit'),
   onRefresh: cb => ipcRenderer.on('refresh', () => cb()),
+
+  // the ⌘⌥ island
+  onIslandOpen: cb => ipcRenderer.on('island:open', () => cb()),
+  onIslandHotkey: cb => ipcRenderer.on('island:hotkey', () => cb()),
+  onIslandBlur: cb => ipcRenderer.on('island:blur', () => cb()),
+  islandClose: () => ipcRenderer.send('island:close'),
+  islandMouse: over => ipcRenderer.send('island:mouse', !!over),
+  islandCommand: q => ipcRenderer.invoke('island:command', q),
+  islandOpenItem: target => ipcRenderer.send('island:open-item', target),
+  islandKey: () => ipcRenderer.invoke('island:key'),
   onStatus: cb => ipcRenderer.on('status', (e, msg) => cb(msg))
 });

@@ -3,11 +3,11 @@
 // • Menu-bar icon: click for the quick panel (drop files, quick note, ask, recent);
 //   drag files straight onto the icon to have Smart Sort file them.
 // • Everything is saved to ~/Library/Application Support/Stash/stash-data.json.
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell, globalShortcut, Notification, net } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell, globalShortcut, Notification, net, screen, session, systemPreferences } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-let win = null, tray = null, pop = null, quitting = false, pendingUpdate = null;
+let win = null, tray = null, pop = null, isl = null, islandKey = '', quitting = false, pendingUpdate = null;
 
 // ---------- self-update from GitHub ----------
 // The app checks version.json in the GitHub repo. If it's newer, the new files are
@@ -79,6 +79,32 @@ function createPopover(){
   pop.on('blur', () => { if (!pop.webContents.isDevToolsOpened()) pop.hide(); });
 }
 
+// ---------- the island: ⌘⌥ voice / type bar that drops out of the notch ----------
+const ISL_W = 640, ISL_H = 520;
+function createIsland(){
+  isl = new BrowserWindow({
+    width: ISL_W, height: ISL_H, show: false, frame: false, transparent: true, resizable: false, movable: false,
+    minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true, hasShadow: false, alwaysOnTop: true,
+    roundedCorners: false, enableLargerThanScreen: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false }
+  });
+  isl.setAlwaysOnTop(true, 'screen-saver');
+  isl.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  isl.setIgnoreMouseEvents(true, { forward: true });
+  isl.loadFile('island.html');
+  isl.on('blur', () => isl.webContents.send('island:blur'));
+}
+async function toggleIsland(){
+  if (isl.isVisible()){ isl.webContents.send('island:hotkey'); return; }
+  if (pop && pop.isVisible()) pop.hide();
+  // sit centred on the top edge of the screen the mouse is on (over the notch / menu bar)
+  const d = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).bounds;
+  isl.setBounds({ x: Math.round(d.x + d.width / 2 - ISL_W / 2), y: d.y, width: ISL_W, height: ISL_H });
+  try { if (systemPreferences.getMediaAccessStatus('microphone') === 'not-determined') await systemPreferences.askForMediaAccess('microphone'); } catch (e) {}
+  isl.show(); isl.focus();
+  isl.webContents.send('island:open');
+}
+
 function togglePopover(){
   if (pop.isVisible()) return pop.hide();
   const b = tray.getBounds(), w = pop.getBounds().width;
@@ -116,6 +142,7 @@ function buildTrayMenu(){
   return Menu.buildFromTemplate([
     { label: 'Open Stash', click: showMain },
     { label: 'Quick Panel', accelerator: 'CommandOrControl+Shift+S', click: togglePopover },
+    { label: `Talk to Stash${islandKey ? '   ' + islandKey : ''}`, click: toggleIsland },
     { label: 'Add Files to Sort…', click: pickFiles },
     { type: 'separator' },
     pendingUpdate ? { label: `Install Update ${pendingUpdate.version}…`, click: installUpdate } : { label: 'Check for Updates…', click: () => checkForUpdates(true) },
@@ -133,6 +160,10 @@ async function pickFiles(){
 app.whenReady().then(() => {
   createWindow();
   createPopover();
+  createIsland();
+  // allow the microphone for Stash's own pages
+  session.defaultSession.setPermissionRequestHandler((wc, perm, cb) => cb(perm === 'media' || perm === 'microphone' || perm === 'audioCapture'));
+  session.defaultSession.setPermissionCheckHandler((wc, perm) => perm === 'media' || perm === 'microphone' || perm === 'audioCapture');
 
   const icon = nativeImage.createFromPath(path.join(__dirname, 'trayTemplate.png'));
   icon.setTemplateImage(true);
@@ -143,6 +174,18 @@ app.whenReady().then(() => {
   tray.on('drop-files', (e, files) => sendFiles(files));       // drag files onto the menu-bar icon
 
   globalShortcut.register('CommandOrControl+Shift+S', togglePopover);
+  // ⌘⌥ + Space opens the island (falls back to ⌘⌥ + Return if Space is taken by the system)
+  for (const [acc, label] of [['Command+Alt+Space', '⌘⌥Space'], ['Command+Alt+Return', '⌘⌥Return'], ['Command+Alt+K', '⌘⌥K']]){
+    try { if (globalShortcut.register(acc, toggleIsland) && globalShortcut.isRegistered(acc)){ islandKey = label; break; } } catch (e) {}
+  }
+  ipcMain.on('island:close', () => { isl.hide(); isl.setIgnoreMouseEvents(true, { forward: true }); });
+  ipcMain.on('island:mouse', (e, over) => isl.setIgnoreMouseEvents(!over, { forward: true }));
+  ipcMain.handle('island:command', async (e, q) => {
+    try { return await win.webContents.executeJavaScript(`window.Stash && window.Stash.command ? window.Stash.command(${JSON.stringify(String(q))}) : null`); }
+    catch (err) { return { text: 'Something went wrong: ' + (err.message || err) }; }
+  });
+  ipcMain.on('island:open-item', (e, target) => { showMain(); win.webContents.send('open', target); });
+  ipcMain.handle('island:key', () => islandKey);
 
   // ---- storage ----
   ipcMain.handle('store:load', () => { try { return fs.readFileSync(dataFile(), 'utf8'); } catch (e) { return null; } });
