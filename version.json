@@ -1,6 +1,6 @@
 {
-  "version": "1.2.0",
-  "notes": "New: press ⌘⌥Space to talk to Stash",
+  "version": "1.2.1",
+  "notes": "Tap ⌘⌥ to talk to Stash (plus a Talk button)",
   "files": [
     "index.html",
     "quick.html",

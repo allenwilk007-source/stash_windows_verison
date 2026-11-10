@@ -414,6 +414,7 @@ body.native .island,body.native #zoom{display:none}
       <button class="g" id="zoom" title="Expand"></button>
     </div>
     <div class="title"><b>Stash</b> — <span id="crumb">All Items</span></div>
+    <button class="askbtn" id="talkTop" title="Talk to Stash (tap ⌘⌥)" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Talk</button>
     <button class="askbtn" id="askTop" title="Ask Stash (⌘J)"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.6C12.55 2.6 12.88 3.15 13.08 4.7c.62 4.7 1.52 5.6 6.22 6.22 1.55.2 2.1.53 2.1 1.08s-.55.88-2.1 1.08c-4.7.62-5.6 1.52-6.22 6.22-.2 1.55-.53 2.1-1.08 2.1s-.88-.55-1.08-2.1c-.62-4.7-1.52-5.6-6.22-6.22C3.15 12.88 2.6 12.55 2.6 12s.55-.88 2.1-1.08c4.7-.62 5.6-1.52 6.22-6.22C11.12 3.15 11.45 2.6 12 2.6Z"/></svg>Ask</button>
     <label class="search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -1779,6 +1780,7 @@ window.Stash = {
 if (window.stashNative){
   const N = window.stashNative;
   document.body.classList.add('native');
+  if (N.islandToggle){ const t = document.getElementById('talkTop'); t.style.display = ''; t.onclick = () => N.islandToggle(); }
   const b64ToFile = f => { const bin = atob(f.data), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return new File([a], f.name, {type: f.type}); };
   N.onIntake(files => Sorter.intake(files.map(b64ToFile)));
   N.onQuickNote(text => {

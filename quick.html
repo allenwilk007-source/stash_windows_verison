@@ -55,6 +55,7 @@ kbd{font-family:inherit;border:1px solid var(--line2);border-radius:4px;padding:
   <div class="grain" id="grain"></div>
   <header>
     <span class="logo"></span><b>Stash<small id="count"></small></b>
+    <button class="hb" id="talkBtn" title="Talk to Stash">🎙 Talk</button>
     <button class="hb solid" id="openBtn">Open</button>
   </header>
   <div class="body">
@@ -118,6 +119,7 @@ async function refresh(){
 }
 $('#rec').addEventListener('click', e => { const b = e.target.closest('[data-id]'); if (b) N.open(b.dataset.id); });
 $('#openBtn').onclick = () => N.open('home');
+$('#talkBtn').onclick = () => { N.hide(); setTimeout(() => N.islandToggle && N.islandToggle(), 120); };
 $('#smart').onclick = () => N.open('sort');
 $('#quit').onclick = () => N.quit();
 addEventListener('keydown', e => { if (e.key === 'Escape') N.hide(); });

@@ -6,7 +6,9 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell, globalShortcut, Notification, net, screen, session, systemPreferences } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 
+let watcher = null, watcherOK = false;
 let win = null, tray = null, pop = null, isl = null, islandKey = '', quitting = false, pendingUpdate = null;
 
 // ---------- self-update from GitHub ----------
@@ -105,6 +107,48 @@ async function toggleIsland(){
   isl.webContents.send('island:open');
 }
 
+// ---------- tap ⌘⌥ (just the two keys) to open the island ----------
+// macOS apps can't register a shortcut that's only modifier keys, so a tiny built-in
+// macOS script watches the ⌘ and ⌥ keys (no extra permissions needed). A quick tap of
+// ⌘⌥ together — with no other key pressed — opens the island. ⌘⌥ + another key is ignored,
+// so normal shortcuts like ⌘⌥Esc keep working.
+const WATCH = `
+ObjC.import('Cocoa'); ObjC.import('CoreGraphics');
+var CMD = 1 << 20, OPT = 1 << 19, SH = 1 << 17, CTL = 1 << 18;
+var out = $.NSFileHandle.fileHandleWithStandardOutput;
+function say(s){ out.writeData($(s + '\\n').dataUsingEncoding($.NSUTF8StringEncoding)); }
+function sinceKey(){ try { return $.CGEventSourceSecondsSinceLastEventType(0, 10); } catch (e) { return 999; } }
+say('ready');
+var down = false, t0 = 0;
+while (true){
+  var f = $.NSEvent.modifierFlags;
+  var both = (f & CMD) && (f & OPT) && !(f & SH) && !(f & CTL);
+  if (both && !down){ down = true; t0 = Date.now(); }
+  else if (!both && down){
+    down = false;
+    var held = (Date.now() - t0) / 1000;
+    if (held > 0.05 && held < 1.5 && sinceKey() > held - 0.03) say('tap');
+  }
+  delay(0.03);
+}`;
+function startModifierWatcher(){
+  if (process.platform !== 'darwin' || quitting) return;
+  try {
+    watcher = spawn('/usr/bin/osascript', ['-l', 'JavaScript', '-e', WATCH], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let buf = '';
+    watcher.stdout.on('data', d => {
+      buf += d.toString(); let i;
+      while ((i = buf.indexOf('\n')) >= 0){
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (line === 'ready') watcherOK = true;
+        if (line === 'tap') toggleIsland();
+      }
+    });
+    watcher.stderr.on('data', d => console.warn('modifier watcher:', d.toString()));
+    watcher.on('exit', () => { watcherOK = false; watcher = null; if (!quitting) setTimeout(startModifierWatcher, 3000); });
+  } catch (e) { console.warn('modifier watcher failed', e); }
+}
+
 function togglePopover(){
   if (pop.isVisible()) return pop.hide();
   const b = tray.getBounds(), w = pop.getBounds().width;
@@ -142,7 +186,7 @@ function buildTrayMenu(){
   return Menu.buildFromTemplate([
     { label: 'Open Stash', click: showMain },
     { label: 'Quick Panel', accelerator: 'CommandOrControl+Shift+S', click: togglePopover },
-    { label: `Talk to Stash${islandKey ? '   ' + islandKey : ''}`, click: toggleIsland },
+    { label: `Talk to Stash   ${watcherOK ? 'tap ⌘⌥' : ''}${watcherOK && islandKey ? '  or  ' : ''}${islandKey}`, click: toggleIsland },
     { label: 'Add Files to Sort…', click: pickFiles },
     { type: 'separator' },
     pendingUpdate ? { label: `Install Update ${pendingUpdate.version}…`, click: installUpdate } : { label: 'Check for Updates…', click: () => checkForUpdates(true) },
@@ -175,9 +219,12 @@ app.whenReady().then(() => {
 
   globalShortcut.register('CommandOrControl+Shift+S', togglePopover);
   // ⌘⌥ + Space opens the island (falls back to ⌘⌥ + Return if Space is taken by the system)
-  for (const [acc, label] of [['Command+Alt+Space', '⌘⌥Space'], ['Command+Alt+Return', '⌘⌥Return'], ['Command+Alt+K', '⌘⌥K']]){
+  // backup keyboard shortcut (⌘⌥Space is often Finder search, so try ⌘⌥Return first)
+  for (const [acc, label] of [['Command+Alt+Return', '⌘⌥Return'], ['Command+Alt+Space', '⌘⌥Space'], ['Command+Alt+K', '⌘⌥K']]){
     try { if (globalShortcut.register(acc, toggleIsland) && globalShortcut.isRegistered(acc)){ islandKey = label; break; } } catch (e) {}
   }
+  startModifierWatcher();
+  ipcMain.on('island:toggle', () => toggleIsland());
   ipcMain.on('island:close', () => { isl.hide(); isl.setIgnoreMouseEvents(true, { forward: true }); });
   ipcMain.on('island:mouse', (e, over) => isl.setIgnoreMouseEvents(!over, { forward: true }));
   ipcMain.handle('island:command', async (e, q) => {
@@ -185,7 +232,7 @@ app.whenReady().then(() => {
     catch (err) { return { text: 'Something went wrong: ' + (err.message || err) }; }
   });
   ipcMain.on('island:open-item', (e, target) => { showMain(); win.webContents.send('open', target); });
-  ipcMain.handle('island:key', () => islandKey);
+  ipcMain.handle('island:key', () => watcherOK ? '⌘⌥' : islandKey);
 
   // ---- storage ----
   ipcMain.handle('store:load', () => { try { return fs.readFileSync(dataFile(), 'utf8'); } catch (e) { return null; } });
@@ -217,5 +264,5 @@ app.whenReady().then(() => {
 
 app.on('activate', showMain);                 // clicking the Dock icon
 app.on('before-quit', () => { quitting = true; });
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('will-quit', () => { globalShortcut.unregisterAll(); try { watcher && watcher.kill(); } catch (e) {} });
 app.on('window-all-closed', e => e.preventDefault()); // keep living in the menu bar

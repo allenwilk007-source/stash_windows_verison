@@ -34,5 +34,6 @@ contextBridge.exposeInMainWorld('stashNative', {
   islandCommand: q => ipcRenderer.invoke('island:command', q),
   islandOpenItem: target => ipcRenderer.send('island:open-item', target),
   islandKey: () => ipcRenderer.invoke('island:key'),
+  islandToggle: () => ipcRenderer.send('island:toggle'),
   onStatus: cb => ipcRenderer.on('status', (e, msg) => cb(msg))
 });
