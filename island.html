@@ -221,13 +221,9 @@ async function submit(text){
   if (!r){ showBubble(`<div class="said">${esc(text)}</div><div class="ans">Stash isn't running its main window right now — open it and try again.</div>`); setState('answered'); return; }
   const src = (r.sources || []).map(s => `<button class="src" data-id="${esc(s.id)}">${esc(s.title)}<small>${esc(s.folder)}</small></button>`).join('');
   // without Claude connected, plain questions get a library-only answer + a way to connect
-  // no AI yet → offer the free on-device AI (one click), with Claude as an option
-  const sz = r.setup?.local?.size || '8 GB';
-  const connect = (r.needsAI || r.needsKey) ? `<div class="key"><div class="kt"><b>Turn on the free AI</b> — it answers anything and can read your screen. Runs right on your Mac: no account, no cost, works offline. One-time download (about ${esc(sz)}).</div>
-    <div class="kr"><button id="freeGo" class="wide">${r.setup?.local?.setting ? 'Setting up…' : 'Turn on free AI'}</button></div>
-    <div class="prog" id="prog"><i></i></div><div class="kerr" id="keyErr"></div>
-    <button class="alt" id="altKey">Have a Claude API key? Use that instead</button>
-    <div class="kr" id="keyRow" style="display:none"><input id="keyIn" type="password" placeholder="sk-ant-…" autocomplete="off"><button id="keyGo">Connect</button></div></div>` : '';
+  // no AI yet → connect Claude (one time; the key is saved securely on this Mac)
+  const connect = (r.needsAI || r.needsKey) ? `<div class="key"><div class="kt"><b>Connect Claude</b> — then Stash can answer anything, read your screen and file notes for you. Paste your Anthropic API key (console.anthropic.com › API Keys). You only do this once.</div>
+    <div class="kr"><input id="keyIn" type="password" placeholder="sk-ant-…" autocomplete="off"><button id="keyGo">Connect</button></div><div class="kerr" id="keyErr"></div></div>` : '';
   showBubble(`<div class="said">${esc(text)}</div><div class="ans">${fmt(r.text || '')}</div>${src ? `<div class="srcs">${src}</div>` : ''}${connect}<div class="hint">Type a follow-up, or press the shortcut again to talk</div>`);
   if (r.needsAI || r.needsKey) wireKey();
   setState('answered'); inp.placeholder = 'Ask a follow-up…';
@@ -245,15 +241,7 @@ function wireKey(){
     if (lastQ) submit(lastQ);   // ask again, this time with Claude
   };
   go.onclick = connect; k.onkeydown = e => { if (e.key === 'Enter'){ e.preventDefault(); e.stopPropagation(); connect(); } };
-  $('#altKey').onclick = () => { $('#keyRow').style.display = 'flex'; $('#altKey').style.display = 'none'; k.focus(); };
-  const free = $('#freeGo');
-  free.onclick = async () => {
-    free.disabled = true; free.textContent = 'Setting up…'; err.textContent = ''; settingUp = true;
-    const r = await N.aiSetupLocal();
-    settingUp = false;
-    if (!r.ok){ free.disabled = false; free.textContent = 'Try again'; err.textContent = r.error || 'Setup failed.'; return; }
-    if (lastQ) submit(lastQ);   // ask again, now with the free AI
-  };
+  setTimeout(() => k.focus(), 50);
 }
 let settingUp = false;
 N.onAISetup?.(p => {

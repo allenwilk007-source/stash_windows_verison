@@ -1,6 +1,6 @@
 {
-  "version": "1.4.1",
-  "notes": "Notes from your screen get filed in the right folder automatically",
+  "version": "1.5.0",
+  "notes": "Stash now runs on Claude",
   "files": [
     "index.html",
     "quick.html",

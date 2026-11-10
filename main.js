@@ -239,7 +239,7 @@ app.whenReady().then(() => {
       if (r) return r;
       // no AI set up yet: do simple Stash commands, and offer the free AI for everything else
       const c = await execInMain(`window.Stash.command(${JSON.stringify(String(q))})`);
-      if (!c.done && !(c.sources || []).length) c.text = "I need the AI switched on to answer that — it's free, one click below.";
+      if (!c.done && !(c.sources || []).length) c.text = "Connect Claude below and I can answer that (and read your screen).";
       return { ...c, needsAI: !c.done, setup: await AI.status() };
     } catch (err) { return { text: 'Something went wrong: ' + (err.message || err) }; }
   });

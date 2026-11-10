@@ -289,8 +289,8 @@ async function askLocal(q, ctx){
 async function ask(q, { exec, status }){
   const lib = await exec('window.Stash && window.Stash.summary ? window.Stash.summary() : ""').catch(() => '');
   const ctx = { exec, status, lib };
+  // Stash runs on Claude (the free on-device engine is switched off)
   if (cfg.key) return askClaude(q, ctx);
-  if (localReady || await checkLocal()) return askLocal(q, ctx);
   return null;
 }
 
@@ -303,6 +303,6 @@ module.exports = {
   status: async () => { ensure(); await checkLocal(); const pick = pickLocalModel(); return { claude: !!cfg.key, model: cfg.model, local: { ready: localReady, model: cfg.localModel || pick.tag, size: pick.size, installed: !!ollamaBin(), setting: !!setupRunning } }; },
   creds: () => { ensure(); return { key: cfg.key, model: cfg.model }; },
   hasAI: () => { ensure(); return !!cfg.key || localReady; },
-  warm: async () => { ensure(); if (await checkLocal() && !cfg.key){ try { await net.fetch(OLLAMA + '/api/generate', { method: 'POST', body: JSON.stringify({ model: cfg.localModel, prompt: '', keep_alive: '30m' }) }); } catch (e) {} } },
+  warm: async () => { ensure(); if (false && await checkLocal() && !cfg.key){ try { await net.fetch(OLLAMA + '/api/generate', { method: 'POST', body: JSON.stringify({ model: cfg.localModel, prompt: '', keep_alive: '30m' }) }); } catch (e) {} } },
   stop: () => { try { ollamaProc && ollamaProc.kill(); } catch (e) {} }
 };
