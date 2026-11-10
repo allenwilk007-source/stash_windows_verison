@@ -14,7 +14,7 @@ curl -fL --progress-bar -o "$TMP/electron.zip" "https://github.com/electron/elec
 say "Downloading Stash…"
 ditto -x -k "$TMP/electron.zip" "$TMP/e"
 APP="$TMP/e/Electron.app"; RES="$APP/Contents/Resources"; mkdir -p "$RES/app"
-for f in boot.js package.json version.json index.html quick.html island.html main.js preload.js trayTemplate.png trayTemplate@2x.png icon.png; do
+for f in boot.js package.json version.json index.html quick.html island.html ai.js main.js preload.js trayTemplate.png trayTemplate@2x.png icon.png; do
   curl -fsSL "$RAW/$f?t=$(date +%s)" -o "$RES/app/$f"
 done
 curl -fsSL "$RAW/icon.icns" -o "$RES/electron.icns"

@@ -1219,7 +1219,16 @@ const Agent = (() => {
   $('#agNew').onclick = () => { history = []; $('#msgs').innerHTML = ''; $('#agent').classList.remove('chatting'); $('#agin').focus(); };
   const setStatus = () => { const st = $('#agstatus'); st.classList.toggle('on', !!apiKey); st.querySelector('span').textContent = apiKey ? `Claude · ${model}` : 'Local mode'; $('#agConnect').textContent = apiKey ? 'Settings' : 'Connect Claude'; };
   $('#agConnect').onclick = () => { $('#keyin').value = apiKey; $('#modelin').value = model; $('#keybox').classList.add('show'); setTimeout(() => $('#keyin').focus(), 50); };
-  $('#keyform').addEventListener('submit', e => { e.preventDefault(); apiKey = $('#keyin').value.trim(); model = $('#modelin').value.trim() || model; $('#keybox').classList.remove('show'); setStatus(); toast(apiKey ? 'Claude connected' : 'Using local mode'); });
+  $('#keyform').addEventListener('submit', async e => {
+    e.preventDefault(); const k = $('#keyin').value.trim(), m = $('#modelin').value.trim();
+    if (window.stashNative?.aiSetKey){
+      // Mac app: the key is saved securely and shared with the ⌘⌥ island and Smart Sort
+      const r = await window.stashNative.aiSetKey(k, m && m !== model ? m : undefined);
+      if (!r.ok){ toast(r.error || "That key didn't work"); return; }
+      apiKey = k; model = r.model || model;
+    } else { apiKey = k; model = m || model; }
+    $('#keybox').classList.remove('show'); setStatus(); toast(apiKey ? `Claude connected · ${model}` : 'Using local mode');
+  });
   $('#keyOff').onclick = () => { apiKey = ''; $('#keybox').classList.remove('show'); setStatus(); };
   $('#keybox').addEventListener('click', e => { if (e.target.id === 'keybox') $('#keybox').classList.remove('show'); });
 
@@ -1238,7 +1247,12 @@ const Agent = (() => {
     }
     const r = localAnswer(q); return {text: r.text, src: r.src};
   }
-  return {reindex, show, hide, ask, answer, creds: () => ({apiKey, model})};
+  function searchItems(q){
+    reindex();
+    return search(q).slice(0, 6).map(({d}) => ({id: d.it.id, title: d.it.title || 'Untitled', type: KIND[d.it.type], folder: fname(d.it), snippet: bestLines(d, q, 2).join(' · ').slice(0, 220)}));
+  }
+  function setCreds(c){ if (!c) return; apiKey = c.key || ''; if (c.model) model = c.model; try { setStatus(); } catch (e) {} }
+  return {reindex, show, hide, ask, answer, searchItems, setCreds, creds: () => ({apiKey, model})};
 })();
 
 /* =========================================================
@@ -1739,6 +1753,44 @@ const Persist = (() => {
 window.Stash = {
   recent: () => [...items].sort((a, b) => b.t - a.t).slice(0, 5).map(it => ({id: it.id, title: it.title || 'Untitled', type: it.type, folder: folders.find(f => f.id === it.folder)?.name || '', thumb: it.type === 'image' ? (it.thumb || it.src) : it.poster || (it.type === 'video' ? it.src : null)})),
   count: () => items.length,
+  // ---- used by the Mac app's AI (Claude with tools) ----
+  summary(){
+    return `${items.length} items. Folders: ` + folders.map(f => {
+      const its = items.filter(i => i.folder === f.id).sort((a, b) => b.t - a.t);
+      return `${f.name} (${its.length}${its.length ? ': ' + its.slice(0, 8).map(i => `${i.title || 'Untitled'} [${KIND[i.type]}]`).join(', ') : ''})`;
+    }).join('; ');
+  },
+  async saveNote({title, body, folder, screenshot}){
+    let f = folder ? folders.find(x => x.name.toLowerCase() === String(folder).toLowerCase()) : null;
+    if (folder && !f){ f = {id: 'f-' + uid(), name: String(folder).slice(0, 40), icon: 'folder'}; folders.push(f); }
+    const fid = f ? f.id : (isFolder('notes') ? 'notes' : homeFolder('note'));
+    const note = {id: uid(), type: 'note', title: String(title || 'Untitled').slice(0, 80), body: String(body || ''), t: Date.now(), folder: fid};
+    items.unshift(note);
+    const src = [note];
+    if (screenshot){
+      const shot = {id: uid(), type: 'image', title: `Screenshot — ${note.title}`.slice(0, 80), t: Date.now(), folder: fid, src: screenshot, thumb: await imageThumb(screenshot).catch(() => screenshot), ext: 'JPG', fname: 'screenshot.jpg', size: Math.round(screenshot.length * .75)};
+      try { const b = await (await fetch(screenshot)).blob(); shot.url = URL.createObjectURL(b); } catch (e) {}
+      items.unshift(shot); src.push(shot);
+    }
+    render();
+    const name = folders.find(x => x.id === fid).name;
+    return {text: `Saved “${note.title}” in ${name}${screenshot ? ' (with the screenshot)' : ''}.`, sources: src.map(it => ({id: it.id, title: it.title, folder: name}))};
+  },
+  createFolder(name){
+    name = String(name || '').trim().slice(0, 40) || 'New Folder';
+    const ex = folders.find(f => f.name.toLowerCase() === name.toLowerCase());
+    if (ex) return {text: `A folder called ${ex.name} already exists.`};
+    folders.push({id: 'f-' + uid(), name, icon: 'folder'}); render();
+    return {text: `Created the folder ${name}.`};
+  },
+  search: q => Agent.searchItems(q),
+  find(name){
+    const w = String(name || '').toLowerCase().replace(/ folder$/, '');
+    const f = folders.find(f => f.name.toLowerCase() === w) || folders.find(f => f.name.toLowerCase().includes(w));
+    if (f) return {id: f.id, title: f.name};
+    const it = items.find(i => (i.title || '').toLowerCase() === w) || items.find(i => (i.title || '').toLowerCase().includes(w));
+    return it ? {id: it.id, title: it.title} : null;
+  },
   // the island (⌘⌥ voice / type bar) sends what you said here: simple commands are done
   // directly ("make a note…", "create a folder…", "open…"); anything else is answered
   async command(raw){
@@ -1757,21 +1809,21 @@ window.Stash = {
       const folder = isFolder('notes') ? 'notes' : homeFolder('note');
       const it = {id: uid(), type: 'note', title: title.charAt(0).toUpperCase() + title.slice(1), body: text.length > title.length ? text : '', t: Date.now(), folder};
       items.unshift(it); render();
-      return say(`Done — saved a note in ${folders.find(f => f.id === folder).name}.`, [it]);
+      return {...say(`Done — saved a note in ${folders.find(f => f.id === folder).name}.`, [it]), done: true};
     }
     if ((m = core.match(/^(?:make|create|add|start|new)\s+(?:a\s+)?(?:new\s+)?folder\s*(?:called|named|for)?\s*(.*)$/i))){
       const name = (m[1] || '').trim().replace(/\b\w/g, c => c.toUpperCase()) || 'New Folder';
       const ex = folders.find(f => f.name.toLowerCase() === name.toLowerCase());
       if (ex) return say(`You already have a folder called ${ex.name}.`);
       folders.push({id: 'f-' + uid(), name, icon: 'folder'}); render();
-      return say(`Created a folder called ${name}.`);
+      return {...say(`Created a folder called ${name}.`), done: true};
     }
     if ((m = core.match(/^(?:open|show(?: me)?|go to|take me to)\s+(?:my\s+|the\s+)?(.+)$/i))){
       const want = m[1].toLowerCase().replace(/ folder$/, '');
       const f = folders.find(f => f.name.toLowerCase() === want) || folders.find(f => f.name.toLowerCase().includes(want) || want.includes(f.name.toLowerCase()));
-      if (f){ window.__islandOpen = f.id; return {...say(`Opening ${f.name}.`), open: f.id}; }
+      if (f){ window.__islandOpen = f.id; return {...say(`Opening ${f.name}.`), open: f.id, done: true}; }
       const it = items.find(i => (i.title || '').toLowerCase() === want) || items.find(i => (i.title || '').toLowerCase().includes(want));
-      if (it) return {...say(`Opening “${it.title}”.`, [it]), open: it.id};
+      if (it) return {...say(`Opening “${it.title}”.`, [it]), open: it.id, done: true};
     }
     const r = await Agent.answer(q);
     return say(r.text.replace(/\*\*/g, ''), r.src || []);
@@ -1780,6 +1832,8 @@ window.Stash = {
 if (window.stashNative){
   const N = window.stashNative;
   document.body.classList.add('native');
+  N.aiCreds?.().then(c => { if (c && c.key) Agent.setCreds(c); }).catch(() => {});
+  N.onAICreds?.(c => Agent.setCreds(c));
   if (N.islandToggle){ const t = document.getElementById('talkTop'); t.style.display = ''; t.onclick = () => N.islandToggle(); }
   const b64ToFile = f => { const bin = atob(f.data), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return new File([a], f.name, {type: f.type}); };
   N.onIntake(files => Sorter.intake(files.map(b64ToFile)));

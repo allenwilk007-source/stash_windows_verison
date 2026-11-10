@@ -59,6 +59,13 @@ button,input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .src:hover{background:rgba(255,255,255,.14)}
 .src small{color:rgba(255,255,255,.45);margin-left:4px}
 .hint{font-size:11.5px;color:rgba(255,255,255,.4);margin-top:10px}
+.stat{font-size:12px;color:#9ab8ff;margin-top:2px}
+.key{margin-top:12px;padding:12px;border-radius:14px;background:rgba(79,134,232,.1);border:1px solid rgba(127,176,255,.25)}
+.kt{font-size:12.5px;line-height:1.5;color:rgba(255,255,255,.75)}
+.kr{display:flex;gap:8px;margin-top:9px}
+.kr input{flex:1;height:32px;padding:0 10px;border-radius:9px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);font-size:13px;color:#fff;user-select:text}
+.kr button{height:32px;padding:0 14px;border-radius:9px;background:#fff;color:#111;font-weight:600;font-size:12.5px;cursor:pointer}
+.kerr{font-size:11.5px;color:#ff9d94;margin-top:6px;min-height:0}
 </style>
 </head>
 <body>
@@ -66,7 +73,7 @@ button,input{font:inherit;color:inherit;background:none;border:0;outline:0}
   <div class="isl" id="isl">
     <div class="row">
       <div class="vis"><canvas id="wave" width="192" height="80"></canvas><div class="orb"></div></div>
-      <div class="mid"><div class="label" id="label">Listening…</div><input id="inp" placeholder="Ask Stash anything…" autocomplete="off" spellcheck="false"></div>
+      <div class="mid"><div class="label" id="label">Listening…</div><input id="inp" placeholder="Ask anything — or about what's on your screen…" autocomplete="off" spellcheck="false"></div>
       <div class="keys" id="keys"><kbd>esc</kbd></div>
     </div>
   </div>
@@ -200,18 +207,34 @@ function showBubble(html){ bub.innerHTML = html; bub.classList.add('show'); }
 function hideBubble(){ bub.classList.remove('show'); }
 async function submit(text){
   if (busy) return; busy = true;
-  inp.value = ''; setState('thinking');
+  inp.value = ''; setState('thinking'); label.textContent = 'Thinking…';
   showBubble(`<div class="said">${esc(text)}</div><div class="ans"><span class="dots"><i></i><i></i><i></i></span></div>`);
   let r;
-  try { r = await N.islandCommand(text); } catch (e) { r = null; }
-  busy = false;
+  try { r = N.aiAsk ? await N.aiAsk(text) : await N.islandCommand(text); } catch (e) { r = null; }
+  busy = false; lastQ = text;
   if (!r){ showBubble(`<div class="said">${esc(text)}</div><div class="ans">Stash isn't running its main window right now — open it and try again.</div>`); setState('answered'); return; }
   const src = (r.sources || []).map(s => `<button class="src" data-id="${esc(s.id)}">${esc(s.title)}<small>${esc(s.folder)}</small></button>`).join('');
-  showBubble(`<div class="said">${esc(text)}</div><div class="ans">${fmt(r.text || '')}</div>${src ? `<div class="srcs">${src}</div>` : ''}<div class="hint">Type a follow-up, or press the shortcut again to talk</div>`);
+  // without Claude connected, plain questions get a library-only answer + a way to connect
+  const connect = r.needsKey ? `<div class="key"><div class="kt"><b>Turn on full AI</b> — answers anything and can see your screen. Paste your Anthropic API key (console.anthropic.com › API Keys):</div><div class="kr"><input id="keyIn" type="password" placeholder="sk-ant-…" autocomplete="off"><button id="keyGo">Connect</button></div><div class="kerr" id="keyErr"></div></div>` : '';
+  showBubble(`<div class="said">${esc(text)}</div><div class="ans">${fmt(r.text || '')}</div>${src ? `<div class="srcs">${src}</div>` : ''}${connect}<div class="hint">Type a follow-up, or press the shortcut again to talk</div>`);
+  if (r.needsKey) wireKey();
   setState('answered'); inp.placeholder = 'Ask a follow-up…';
   setTimeout(() => inp.focus(), 30);
   if (r.open) setTimeout(() => N.islandOpenItem(r.open), 700);
 }
+let lastQ = '';
+function wireKey(){
+  const k = $('#keyIn'), go = $('#keyGo'), err = $('#keyErr');
+  const connect = async () => {
+    if (!k.value.trim()) return k.focus();
+    go.textContent = 'Checking…'; go.disabled = true; err.textContent = '';
+    const r = await N.aiSetKey(k.value.trim());
+    if (!r.ok){ go.textContent = 'Connect'; go.disabled = false; err.textContent = r.error || "That key didn't work."; return; }
+    if (lastQ) submit(lastQ);   // ask again, this time with Claude
+  };
+  go.onclick = connect; k.onkeydown = e => { if (e.key === 'Enter'){ e.preventDefault(); e.stopPropagation(); connect(); } };
+}
+N.onIslandStatus?.(msg => { const d = bub.querySelector('.ans .dots'); if (d && state === 'thinking'){ let l = bub.querySelector('.stat'); if (!l){ l = document.createElement('div'); l.className = 'stat'; d.after(l); } l.textContent = msg; } });
 bub.addEventListener('click', e => { const b = e.target.closest('.src'); if (b) N.islandOpenItem(b.dataset.id); });
 
 /* ---------- open / close ---------- */

@@ -7,6 +7,7 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell, glo
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const AI = require(path.join(__dirname, 'ai.js'));
 
 let watcher = null, watcherOK = false;
 let win = null, tray = null, pop = null, isl = null, islandKey = '', quitting = false, pendingUpdate = null;
@@ -103,6 +104,8 @@ async function toggleIsland(){
   const d = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).bounds;
   isl.setBounds({ x: Math.round(d.x + d.width / 2 - ISL_W / 2), y: d.y, width: ISL_W, height: ISL_H });
   try { if (systemPreferences.getMediaAccessStatus('microphone') === 'not-determined') await systemPreferences.askForMediaAccess('microphone'); } catch (e) {}
+  await AI.preCapture();            // grab the screen *before* the island covers any of it
+  AI.reset();                       // each time you open the island is a fresh conversation
   isl.show(); isl.focus();
   isl.webContents.send('island:open');
 }
@@ -227,6 +230,22 @@ app.whenReady().then(() => {
   ipcMain.on('island:toggle', () => toggleIsland());
   ipcMain.on('island:close', () => { isl.hide(); isl.setIgnoreMouseEvents(true, { forward: true }); });
   ipcMain.on('island:mouse', (e, over) => isl.setIgnoreMouseEvents(!over, { forward: true }));
+  // ---- the AI ----
+  const execInMain = js => win.webContents.executeJavaScript(js);
+  ipcMain.handle('ai:ask', async (e, q) => {
+    const status = msg => { try { e.sender.send('island:status', msg); } catch (err) {} };
+    try {
+      if (AI.hasKey()) return await AI.ask(String(q), { exec: execInMain, status });
+      const r = await execInMain(`window.Stash.command(${JSON.stringify(String(q))})`);
+      return { ...r, needsKey: !r.done };
+    } catch (err) { return { text: 'Something went wrong: ' + (err.message || err) }; }
+  });
+  ipcMain.handle('ai:setKey', async (e, key, model) => {
+    const r = await AI.setKey(key, model);
+    if (r.ok && win && !win.isDestroyed()) win.webContents.send('ai-creds', AI.creds());
+    return r;
+  });
+  ipcMain.handle('ai:creds', () => AI.creds());
   ipcMain.handle('island:command', async (e, q) => {
     try { return await win.webContents.executeJavaScript(`window.Stash && window.Stash.command ? window.Stash.command(${JSON.stringify(String(q))}) : null`); }
     catch (err) { return { text: 'Something went wrong: ' + (err.message || err) }; }

@@ -35,5 +35,10 @@ contextBridge.exposeInMainWorld('stashNative', {
   islandOpenItem: target => ipcRenderer.send('island:open-item', target),
   islandKey: () => ipcRenderer.invoke('island:key'),
   islandToggle: () => ipcRenderer.send('island:toggle'),
+  onIslandStatus: cb => ipcRenderer.on('island:status', (e, m) => cb(m)),
+  aiAsk: q => ipcRenderer.invoke('ai:ask', q),
+  aiSetKey: (key, model) => ipcRenderer.invoke('ai:setKey', key, model),
+  aiCreds: () => ipcRenderer.invoke('ai:creds'),
+  onAICreds: cb => ipcRenderer.on('ai-creds', (e, c) => cb(c)),
   onStatus: cb => ipcRenderer.on('status', (e, msg) => cb(msg))
 });
