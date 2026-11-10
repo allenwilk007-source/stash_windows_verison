@@ -1801,6 +1801,9 @@ window.Stash = {
     let core = q.replace(/^(hey|hi|hello|ok|okay|yo)[,!\s]+/i, '').replace(/^stash[,!\s]+/i, '')
       .replace(/^(can|could|would|will) you( please)?\s+/i, '').replace(/^please\s+/i, '')
       .replace(/\s*(for me)?\s*(please)?[.?!]*$/i, '').trim();
+    // anything about the screen needs real AI (it can't be faked with a search)
+    if (/\b(on|of|from) (my |the )?screen\b|\bscreenshot\b|what i'?m (looking at|seeing)|\bthis (page|tab|window|error|message|tweet|post)\b/i.test(core))
+      return {...say("To read what's on your screen I need the full AI switched on — paste your Anthropic API key below and I'll do it straight away."), needsKey: true};
     let m;
     if ((m = core.match(/^(?:make|create|add|write|save|take|jot(?: down)?)\s+(?:me\s+)?(?:a\s+)?(?:new\s+|quick\s+)?note\b[\s:,-]*(?:that says|saying|about|called|titled|to)?\s*([\s\S]*)$/i)) || (m = core.match(/^(?:note|remember)(?: that)?[\s:,-]+([\s\S]+)$/i))){
       const text = (m[1] || '').trim();
