@@ -10,6 +10,17 @@ Open **Terminal** and paste:
 curl -fsSL https://raw.githubusercontent.com/charliecurrin/stash/main/install.sh | bash
 ```
 
+### Windows
+Download this repo (Code → Download ZIP, then unzip), open **PowerShell** in the folder and run:
+
+```
+powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
+```
+
+Stash installs to `%LOCALAPPDATA%\Programs\Stash`, adds Start Menu and Desktop shortcuts,
+and lives in the taskbar tray. Shortcuts use Ctrl instead of ⌘ (Ctrl+Shift+S quick panel,
+Ctrl+Alt+Space to talk to Stash). Auto-update is off on Windows; re-run the installer to update.
+
 ## Updates
 Stash checks this repo for a newer `version.json` when it starts (and every few hours).
 When there's a new version, a **Restart & Update** button appears in the app.

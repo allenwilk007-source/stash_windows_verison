@@ -9,6 +9,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const AI = require(path.join(__dirname, 'ai.js'));
 
+const IS_MAC = process.platform === 'darwin', IS_WIN = process.platform === 'win32';
 let watcher = null, watcherOK = false;
 let win = null, tray = null, pop = null, isl = null, islandKey = '', quitting = false, pendingUpdate = null;
 
@@ -21,6 +22,13 @@ const localVersion = () => { try { return JSON.parse(fs.readFileSync(path.join(_
 const newer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++){ if ((x[i] || 0) > (y[i] || 0)) return true; if ((x[i] || 0) < (y[i] || 0)) return false; } return false; };
 async function fetchBuf(url){ const r = await net.fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error(`${r.status} ${url}`); return Buffer.from(await r.arrayBuffer()); }
 async function checkForUpdates(manual){
+  // The GitHub repo ships the Mac build. Auto-updating from it would replace this
+  // Windows-patched main.js with the Mac one, so on Windows updates come from re-running
+  // install-windows.ps1 instead.
+  if (IS_WIN){
+    if (manual) dialog.showMessageBox({ message: `Stash ${localVersion()} for Windows`, detail: 'To update, run install-windows.ps1 again from your Stash folder.' });
+    return;
+  }
   try {
     const remote = JSON.parse((await fetchBuf(`${RAW}/version.json?t=${Date.now()}`)).toString('utf8'));
     if (!newer(remote.version, localVersion())){
@@ -58,13 +66,22 @@ if (!app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', () => showMain());
 
 function createWindow(){
+  // Mac: traffic lights inset into Stash's own toolbar. Windows: hide the title bar and
+  // draw the native minimise / maximise / close buttons over the right end of the toolbar.
+  const chrome = IS_MAC
+    ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } }
+    : { titleBarStyle: 'hidden', titleBarOverlay: { color: '#141416', symbolColor: '#d8d8dc', height: 45 }, icon: path.join(__dirname, 'icon.png') };
   win = new BrowserWindow({
     width: 1180, height: 780, minWidth: 760, minHeight: 520, show: false,
-    title: 'Stash', titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 },
+    title: 'Stash', ...chrome,
     backgroundColor: '#141416',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false }
   });
   win.loadFile(path.join(__dirname, 'index.html'));
+  if (!IS_MAC){
+    // no traffic-light gap on the left; keep toolbar buttons clear of the window controls on the right
+    win.webContents.on('did-finish-load', () => win.webContents.insertCSS('body.native .lights{display:none} body.native .bar{padding-right:150px}'));
+  }
   win.once('ready-to-show', () => win.show());
   // closing the window keeps Stash running in the menu bar
   win.on('close', e => { if (!quitting){ e.preventDefault(); win.hide(); } });
@@ -80,6 +97,11 @@ function createPopover(){
   });
   pop.loadFile(path.join(__dirname, 'quick.html'));
   pop.on('blur', () => { if (!pop.webContents.isDevToolsOpened()) pop.hide(); });
+  if (!IS_MAC){
+    // show Ctrl / Shift instead of the Mac ⌘ / ⇧ key symbols
+    pop.webContents.on('did-finish-load', () => pop.webContents.executeJavaScript(
+      `document.querySelectorAll('kbd').forEach(k => { const m = { '⌘': 'Ctrl', '⇧': 'Shift', '⌥': 'Alt' }[k.textContent]; if (m) k.textContent = m; })`).catch(() => {}));
+  }
 }
 
 // ---------- the island: ⌘⌥ voice / type bar that drops out of the notch ----------
@@ -154,8 +176,15 @@ function startModifierWatcher(){
 
 function togglePopover(){
   if (pop.isVisible()) return pop.hide();
-  const b = tray.getBounds(), w = pop.getBounds().width;
-  pop.setPosition(Math.round(b.x + b.width / 2 - w / 2), Math.round(b.y + b.height + 4), false);
+  const b = tray.getBounds(), { width: w, height: h } = pop.getBounds();
+  const wa = screen.getDisplayNearestPoint({ x: b.x, y: b.y }).workArea;
+  // Mac menu bar is at the top → open below the icon; Windows taskbar is usually at the
+  // bottom → open above it. Either way keep the panel fully on screen.
+  const below = b.y + b.height / 2 < wa.y + wa.height / 2;
+  let x = Math.round(b.x + b.width / 2 - w / 2), y = below ? Math.round(b.y + b.height + 4) : Math.round(b.y - h - 4);
+  x = Math.max(wa.x + 8, Math.min(x, wa.x + wa.width - w - 8));
+  y = Math.max(wa.y + 8, Math.min(y, wa.y + wa.height - h - 8));
+  pop.setPosition(x, y, false);
   pop.show(); pop.focus();
   pop.webContents.send('refresh');
 }
@@ -204,7 +233,16 @@ async function pickFiles(){
   if (!r.canceled) sendFiles(r.filePaths);
 }
 
+// Windows notifications need an app ID that matches a Start Menu shortcut
+if (IS_WIN) app.setAppUserModelId('com.charlie.stash');
+
 app.whenReady().then(() => {
+  if (IS_WIN){
+    try {
+      const lnk = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Stash.lnk');
+      shell.writeShortcutLink(lnk, fs.existsSync(lnk) ? 'replace' : 'create', { target: process.execPath, appUserModelId: 'com.charlie.stash', icon: path.join(path.dirname(process.execPath), 'stash.ico'), iconIndex: 0, description: 'Stash' });
+    } catch (e) { console.warn('start menu shortcut failed', e); }
+  }
   createWindow();
   createPopover();
   createIsland();
@@ -212,8 +250,9 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((wc, perm, cb) => cb(perm === 'media' || perm === 'microphone' || perm === 'audioCapture'));
   session.defaultSession.setPermissionCheckHandler((wc, perm) => perm === 'media' || perm === 'microphone' || perm === 'audioCapture');
 
-  const icon = nativeImage.createFromPath(path.join(__dirname, 'trayTemplate.png'));
-  icon.setTemplateImage(true);
+  let icon;
+  if (IS_MAC){ icon = nativeImage.createFromPath(path.join(__dirname, 'trayTemplate.png')); icon.setTemplateImage(true); }
+  else icon = nativeImage.createFromPath(path.join(__dirname, 'icon.png')).resize({ width: 16, height: 16, quality: 'best' });  // the black template icon is invisible on a dark taskbar
   tray = new Tray(icon);
   tray.setToolTip('Stash — click for quick actions, or drop files here');
   tray.on('click', togglePopover);
@@ -223,7 +262,10 @@ app.whenReady().then(() => {
   globalShortcut.register('CommandOrControl+Shift+S', togglePopover);
   // ⌘⌥ + Space opens the island (falls back to ⌘⌥ + Return if Space is taken by the system)
   // backup keyboard shortcut (⌘⌥Space is often Finder search, so try ⌘⌥Return first)
-  for (const [acc, label] of [['Command+Alt+Return', '⌘⌥Return'], ['Command+Alt+Space', '⌘⌥Space'], ['Command+Alt+K', '⌘⌥K']]){
+  const islandKeys = IS_MAC
+    ? [['Command+Alt+Return', '⌘⌥Return'], ['Command+Alt+Space', '⌘⌥Space'], ['Command+Alt+K', '⌘⌥K']]
+    : [['Control+Alt+Space', 'Ctrl+Alt+Space'], ['Control+Alt+Return', 'Ctrl+Alt+Enter'], ['Control+Alt+K', 'Ctrl+Alt+K']];
+  for (const [acc, label] of islandKeys){
     try { if (globalShortcut.register(acc, toggleIsland) && globalShortcut.isRegistered(acc)){ islandKey = label; break; } } catch (e) {}
   }
   startModifierWatcher();

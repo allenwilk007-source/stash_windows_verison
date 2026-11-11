@@ -56,7 +56,7 @@ function pickLocalModel(){
 }
 const ollamaHome = () => path.join(app.getPath('userData'), 'ollama');
 function ollamaBin(){
-  const c = [path.join(ollamaHome(), 'Ollama.app/Contents/Resources/ollama'), '/Applications/Ollama.app/Contents/Resources/ollama', '/opt/homebrew/bin/ollama', '/usr/local/bin/ollama'];
+  const c = process.platform === 'win32' ? [path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Ollama', 'ollama.exe')] : [path.join(ollamaHome(), 'Ollama.app/Contents/Resources/ollama'), '/Applications/Ollama.app/Contents/Resources/ollama', '/opt/homebrew/bin/ollama', '/usr/local/bin/ollama'];
   return c.find(p => { try { return fs.statSync(p).isFile(); } catch (e) { return false; } }) || null;
 }
 let ollamaProc = null;
@@ -96,6 +96,8 @@ const unzip = (zip, dest) => new Promise((res, rej) => execFile('/usr/bin/ditto'
 /** one-click setup of the free AI; progress({stage, pct, text}) */
 function setupLocal(progress){
   if (setupRunning) return setupRunning;
+  // the one-click engine download below is the Mac build of Ollama
+  if (process.platform !== 'darwin' && !ollamaBin()) return Promise.resolve({ ok: false, error: 'The free on-device AI is Mac-only for now. Install Ollama for Windows from ollama.com, or connect Claude instead.' });
   setupRunning = (async () => {
     const pick = pickLocalModel();
     try {
@@ -154,7 +156,8 @@ async function captureScreen(){
 async function preCapture(){ lastShot = screenAllowed() ? await captureScreen() : null; }
 const SCREEN_RE = /\b(on|of|from|in) (my |the )?screen\b|\bscreenshot\b|what i'?m (looking at|seeing|reading)|\b(this|that) (page|tab|window|error|message|tweet|post|email|image|picture|chart|graph|code|text|website|site|doc|document|video)\b|\bwhat does this\b|\bread this\b|\bexplain this\b|\bsummari[sz]e this\b|\bsave this\b|\bwhat is this\b/i;
 const SAVE_RE = /\b(make|save|add|put|write|jot|take|create|copy|keep|store)\b[\s\S]{0,40}\b(note|notes|stash|down|folder)\b/i;
-const NO_SCREEN_MSG = "I can't see your screen yet — Stash needs Screen Recording permission. I've opened the setting: switch on Stash under Privacy & Security › Screen & System Audio Recording, then quit and reopen Stash.";
+const openScreenSettings = () => { if (process.platform === 'darwin') shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'); };
+const NO_SCREEN_MSG = process.platform !== 'darwin' ? "I couldn't capture your screen just now — try again in a moment." : "I can't see your screen yet — Stash needs Screen Recording permission. I've opened the setting: switch on Stash under Privacy & Security › Screen & System Audio Recording, then quit and reopen Stash.";
 
 /* =====================  tools (shared by both brains)  ===================== */
 const TOOL_DEFS = [
@@ -187,7 +190,7 @@ async function runTool(name, input, { exec, status }, sources, setOpen){
   }
   return 'Unknown tool';
 }
-const systemPrompt = lib => `You are Stash — ${ME ? ME.name + ' (@' + ME.username + ')' : 'the user'}'s personal AI assistant on their Mac. You're a general assistant, not limited to their library: answer any question, explain things, write, plan, brainstorm, do maths, help with whatever is on their screen.
+const systemPrompt = lib => `You are Stash — ${ME ? ME.name + ' (@' + ME.username + ')' : 'the user'}'s personal AI assistant on their ${process.platform === 'darwin' ? 'Mac' : 'computer'}. You're a general assistant, not limited to their library: answer any question, explain things, write, plan, brainstorm, do maths, help with whatever is on their screen.
 You appear as a small bar at the top of the screen, so be brief by default (1–4 short sentences, or a few bullets). Plain text, at most light **bold**; no headings or tables.
 You can save and organise things in their Stash library with your tools. When they ask you to note/save something, call save_note (don't just reply with the text). Afterwards confirm in one short line what you saved and which folder it went in. Only use a tool when it's actually needed.
 Today is ${new Date().toDateString()}.
@@ -248,7 +251,7 @@ Answer any question at all, the way Claude would. Be accurate; if unsure, say so
         if (u.name === 'look_at_screen'){
           ctx.status('Looking at your screen…');
           const shot = lastShot || await captureScreen();
-          if (!shot){ shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'); content = 'Screen capture is not permitted yet. ' + NO_SCREEN_MSG; }
+          if (!shot){ openScreenSettings(); content = 'Screen capture is not permitted yet. ' + NO_SCREEN_MSG; }
           else { lastShot = shot; content = [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: shot } }, { type: 'text', text: "This is the user's screen." }]; }
         } else content = await runTool(u.name, u.input, ctx, sources, id => open = id);
       } catch (e) { content = 'Tool failed: ' + (e.message || e); }
@@ -268,7 +271,7 @@ async function askLocal(q, ctx){
   if (SCREEN_RE.test(q) || (localHistory.length === 0 && /\bthis\b/i.test(q) && lastShot)){
     ctx.status('Looking at your screen…');
     const shot = lastShot || await captureScreen();
-    if (!shot){ shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'); return { text: NO_SCREEN_MSG, ai: 'local' }; }
+    if (!shot){ openScreenSettings(); return { text: NO_SCREEN_MSG, ai: 'local' }; }
     lastShot = shot; images = [shot];
   }
   const tools = TOOL_DEFS.filter(t => t.name !== 'look_at_screen').map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.params } }));
