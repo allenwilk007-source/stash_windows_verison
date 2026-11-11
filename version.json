@@ -1,6 +1,6 @@
 {
-  "version": "1.9.2",
-  "notes": "Drag pictures anywhere in a note \u2014 text wraps around them. Double-click any empty spot to add text.",
+  "version": "1.10.0",
+  "notes": "Shared sections: make a shared space for a team with its own folders \u2014 everything inside is shared",
   "files": [
     "index.html",
     "notes.js",

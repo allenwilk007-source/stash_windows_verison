@@ -22,6 +22,7 @@ const Collab = (() => {
   let dbChan = null;
 
   const sid = id => 's:' + id;
+  const pushT = new Map();   // when we last saved a section's folder list (so our own echo doesn't undo newer edits)
   const COLORS = ['#4f86e8', '#8b5cf6', '#ec4899', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#64748b'];
   const initials = n => (String(n || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2) || '?');
   const avatarOf = (p, size = 24, ring = false) => `<span class="cav" title="${esc((p.display_name || '') + ' @' + (p.username || ''))}" style="width:${size}px;height:${size}px;font-size:${Math.round(size * .42)}px;${p.photo ? `background-image:url('${p.photo}')` : `background:${p.color || COLORS[0]}`};${ring ? `box-shadow:0 0 0 2px ${p.color || COLORS[0]}` : ''}">${p.photo ? '' : esc(initials(p.display_name))}</span>`;
@@ -141,6 +142,17 @@ const Collab = (() => {
     items = items.filter(i => !i.space); folders = folders.filter(f => !f.shared);
     spaces.clear(); byRid.clear(); known.clear();
   }
+  // a shared section can hold its own folders (stored on the space as [{id, name}])
+  function subsFor(s){ return (Array.isArray(s.folders) ? s.folders : []).map(x => { const id = sid(s.id) + '/' + x.id, f = folders.find(y => y.id === id); if (f){ f.name = x.name; return f; } return { id, name: x.name, icon: 'folder', shared: true, spaceId: s.id, sub: x.id, parent: sid(s.id) }; }); }
+  function syncSubs(s){
+    const keep = folders.filter(f => !(f.spaceId === s.id && f.sub)), subs = subsFor(s);
+    const at = keep.findIndex(f => f.id === sid(s.id));
+    keep.splice(at < 0 ? keep.length : at + 1, 0, ...subs); folders = keep;
+    const okIds = new Set(subs.map(f => f.id));
+    items.forEach(i => { if (i.space === s.id && i._wantSub && okIds.has(sid(s.id) + '/' + i._wantSub)){ i.folder = sid(s.id) + '/' + i._wantSub; i.sub = i._wantSub; delete i._wantSub; } });
+    items.forEach(i => { if (i.space === s.id && i.folder !== sid(s.id) && !okIds.has(i.folder) && String(i.folder).startsWith(sid(s.id) + '/')) i.folder = sid(s.id); });
+    if (String(view).startsWith(sid(s.id) + '/') && !okIds.has(view)) view = sid(s.id);
+  }
   function folderFor(s){ return { id: sid(s.id), name: s.name, icon: s.kind === 'doc' ? 'note' : 'users', shared: true, spaceId: s.id, kind: s.kind, owner: s.owner }; }
   async function signed(paths){
     if (!paths.length) return {};
@@ -149,7 +161,8 @@ const Collab = (() => {
   }
   function toItem(row, urls = {}){
     const it = byRid.get(row.id) || { id: 'r:' + row.id };
-    Object.assign(it, { rid: row.id, space: row.space_id, folder: sid(row.space_id), type: row.type, title: row.title, body: row.body, link: row.link || undefined,
+    const subOk = row.sub && (spaces.get(row.space_id)?.folders || []).some(x => x.id === row.sub);
+    Object.assign(it, { rid: row.id, space: row.space_id, folder: subOk ? sid(row.space_id) + '/' + row.sub : sid(row.space_id), sub: subOk ? row.sub : undefined, _wantSub: !subOk && row.sub ? row.sub : undefined, type: row.type, title: row.title, body: row.body, link: row.link || undefined,
       ext: row.ext || undefined, mime: row.mime || undefined, fname: row.fname || undefined, size: row.size || undefined, dur: row.dur || undefined,
       t: Date.parse(row.updated_at), updatedBy: row.updated_by, filePath: row.file_path || undefined, thumb: row.thumb || it.thumb });
     if (row.doc && typeof row.doc === 'object') it.doc = row.doc; else if (row.type === 'note' && !row.doc && it.doc && !(live && live.rid === row.id)) delete it.doc;
@@ -167,9 +180,12 @@ const Collab = (() => {
       sb.from('space_items').select('*').eq('space_id', spaceId)
     ]);
     if (!s) return null;
+    const prev = spaces.get(s.id);
+    if (prev && Date.now() - (pushT.get(s.id) || 0) < 2500) s.folders = prev.folders;
     const sp = { ...s, members: (mem || []).map(m => ({ ...m.profiles, role: m.role })).sort((a, b) => (b.role === 'owner') - (a.role === 'owner')) };
     spaces.set(s.id, sp);
     const f = folders.find(x => x.id === sid(s.id)); if (f) Object.assign(f, folderFor(s)); else folders.push(folderFor(s));
+    syncSubs(sp);
     const urls = await signed((rows || []).filter(r => r.file_path).map(r => r.file_path));
     (rows || []).forEach(r => toItem(r, urls));
     return sp;
@@ -206,7 +222,7 @@ const Collab = (() => {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'spaces' }, async p => {
         if (p.eventType === 'DELETE'){ removeSpaceLocal(p.old.id, 'A shared folder was deleted by its owner'); return; }
-        const sp = spaces.get(p.new.id); if (sp){ sp.name = p.new.name; const f = folders.find(x => x.id === sid(sp.id)); if (f) f.name = p.new.name; render(); }
+        const sp = spaces.get(p.new.id); if (sp){ sp.name = p.new.name; const fresh = p.new.folders && Date.now() - (pushT.get(sp.id) || 0) > 2500; if (fresh) sp.folders = p.new.folders; const f = folders.find(x => x.id === sid(sp.id)); if (f) f.name = p.new.name; if (fresh) syncSubs(sp); render(); }
       })
       .subscribe();
   }
@@ -214,9 +230,9 @@ const Collab = (() => {
     if (!spaces.has(spaceId)) return;
     spaces.delete(spaceId);
     items.filter(i => i.space === spaceId).forEach(i => { byRid.delete(i.rid); known.delete(i.rid); });
-    items = items.filter(i => i.space !== spaceId); folders = folders.filter(f => f.id !== sid(spaceId));
+    items = items.filter(i => i.space !== spaceId); folders = folders.filter(f => f.id !== sid(spaceId) && f.spaceId !== spaceId);
     if (open && open.space === spaceId) closeItem();
-    if (view === sid(spaceId)) view = 'home';
+    if (view === sid(spaceId) || String(view).startsWith(sid(spaceId) + '/')) view = 'home';
     render(); if (msg) toast(msg);
   }
 
@@ -229,11 +245,11 @@ const Collab = (() => {
   }
   async function upload(it){
     pending.add(it);
-    const spaceId = folders.find(f => f.id === it.folder)?.spaceId;
+    const fo = folders.find(f => f.id === it.folder), spaceId = fo?.spaceId;
     // the id is made here so the live "new row" echo maps back onto this same item
-    const rid = crypto.randomUUID(); it.rid = rid; it.space = spaceId; byRid.set(rid, it); known.add(rid);
+    const rid = crypto.randomUUID(); it.rid = rid; it.space = spaceId; it.sub = fo?.sub || undefined; byRid.set(rid, it); known.add(rid);
     try {
-      const row = { id: rid, space_id: spaceId, type: it.type === 'link' ? 'link' : it.type, title: it.title || '', body: it.body || '', link: it.link || null, ext: it.ext || null, mime: it.mime || null, fname: it.fname || null, size: it.size || null, dur: it.dur || null, created_by: user.id, updated_by: user.id };
+      const row = { id: rid, space_id: spaceId, sub: fo?.sub || null, type: it.type === 'link' ? 'link' : it.type, title: it.title || '', body: it.body || '', link: it.link || null, ext: it.ext || null, mime: it.mime || null, fname: it.fname || null, size: it.size || null, dur: it.dur || null, created_by: user.id, updated_by: user.id };
       if (it.type === 'note' && it.doc){ await shareMedia(it.doc, spaceId); row.doc = it.doc; row.body = window.Pad ? Pad.toText(it.doc) : row.body; }
       if (it.type === 'image') row.thumb = it.thumb && it.thumb.length < 400000 ? it.thumb : (it.src ? await imageThumb(it.src, 480).catch(() => null) : null);
       if (it.type === 'video') row.thumb = it.poster || null;
@@ -300,17 +316,27 @@ const Collab = (() => {
   async function reconcile(){
     if (!ready || syncing) return; syncing = true;
     try {
-      const sharedIds = new Set(folders.filter(f => f.shared).map(f => f.id));
+      const fOf = id => folders.find(f => f.id === id);
       for (const it of items){
         if (pending.has(it)) continue;
-        if (!it.rid && sharedIds.has(it.folder)) upload(it);
-        else if (it.rid && it.folder !== sid(it.space)){
-          if (sharedIds.has(it.folder) && !it.filePath){ const ns = folders.find(f => f.id === it.folder).spaceId, patch = { space_id: ns, updated_by: user.id }; if (it.type === 'note' && it.doc){ await shareMedia(it.doc, ns); patch.doc = it.doc; } await sb.from('space_items').update(patch).eq('id', it.rid); it.space = ns; }
-          else if (sharedIds.has(it.folder)){ const old = it.rid; byRid.delete(old); known.delete(old); delete it.rid; await sb.from('space_items').delete().eq('id', old); upload(it); }
-          else await makeLocal(it);
+        const fo = fOf(it.folder), fsp = fo && fo.shared ? fo.spaceId : null;
+        if (!it.rid){ if (fsp) upload(it); continue; }
+        if (fsp === it.space){
+          const ns = fo.sub || null;
+          if ((it.sub || null) !== ns){ it.sub = ns || undefined; await sb.from('space_items').update({ sub: ns, updated_by: user.id }).eq('id', it.rid); }
+          continue;
         }
+        if (fsp && !it.filePath){ const patch = { space_id: fsp, sub: fo.sub || null, updated_by: user.id }; if (it.type === 'note' && it.doc){ await shareMedia(it.doc, fsp); patch.doc = it.doc; } await sb.from('space_items').update(patch).eq('id', it.rid); it.space = fsp; it.sub = fo.sub || undefined; }
+        else if (fsp){ const old = it.rid; byRid.delete(old); known.delete(old); delete it.rid; await sb.from('space_items').delete().eq('id', old); upload(it); }
+        else await makeLocal(it);
       }
-      for (const f of folders.filter(f => f.shared)){ const sp = spaces.get(f.spaceId); if (sp && f.name !== sp.name){ sp.name = f.name; sb.from('spaces').update({ name: f.name }).eq('id', sp.id).then(() => {}); } }
+      for (const f of folders.filter(f => f.shared && !f.sub)){ const sp = spaces.get(f.spaceId); if (sp && f.name !== sp.name){ sp.name = f.name; sb.from('spaces').update({ name: f.name }).eq('id', sp.id).then(() => {}); } }
+      // folders inside sections: created / renamed / reordered / deleted here → saved on the section
+      for (const sp of spaces.values()){
+        if (sp.kind !== 'folder') continue;
+        const local = folders.filter(f => f.spaceId === sp.id && f.sub).map(f => ({ id: f.sub, name: f.name }));
+        if (JSON.stringify(local) !== JSON.stringify(sp.folders || [])){ sp.folders = local; pushT.set(sp.id, Date.now()); await sb.from('spaces').update({ folders: local }).eq('id', sp.id); pushT.set(sp.id, Date.now()); }
+      }
       const present = new Set(items.filter(i => i.rid).map(i => i.rid));
       for (const rid of [...known]) if (!present.has(rid)){ known.delete(rid); byRid.delete(rid); sb.from('space_items').delete().eq('id', rid).then(() => {}); }
     } finally { syncing = false; }
@@ -655,17 +681,59 @@ const Collab = (() => {
 
   /* =====================  sidebar  ===================== */
   function sideHTML(row){
-    const sh = folders.filter(f => f.shared); if (!sh.length) return '';
-    return `<h6>Shared</h6>` + sh.map(f => {
+    if (!ready) return '';
+    const secs = folders.filter(f => f.shared && !f.sub);
+    let h = `<h6 class="shh"><span>Shared</span><button class="shadd" id="newSection" title="New shared section">${svg('plus')}</button></h6>`;
+    if (!secs.length) h += `<button class="nav shhint" id="newSection2">${svg('users')}<span>New shared section</span></button>`;
+    for (const f of secs){
       const sp = spaces.get(f.spaceId), others = sp ? sp.members.filter(m => m.id !== user?.id) : [];
-      return row(f.id, f.name, f.icon, true).replace('<em>', `<span class="cstack">${others.slice(0, 3).map(m => avatarOf(m, 16)).join('')}</span><em>`);
-    }).join('');
+      const total = items.filter(i => i.space === f.spaceId).length;
+      h += row(f.id, f.name, f.icon, true).replace(/<em>[^<]*<\/em>/, `<span class="cstack">${others.slice(0, 3).map(m => avatarOf(m, 16)).join('')}</span><em>${total}</em>`);
+      h += folders.filter(x => x.parent === f.id).map(x => row(x.id, x.name, 'folder', true).replace('class="nav ', 'class="nav csub ')).join('');
+    }
+    return h;
+  }
+  async function newSection(){
+    if (!ready){ toast('Sign in to share'); return; }
+    dialog(`<h3>New shared section</h3><p>A shared space for a team or project. Everything you put in it — folders, notes, images, videos, files — is shared with the people you invite.</p>
+      <div class="fld"><div class="in"><input id="nsN" placeholder="e.g. Content Rewards team" maxlength="60"></div></div>
+      <div class="row"><button class="btn" id="nsC">Cancel</button><button class="btn w" id="nsGo">Create & invite</button></div>`, close => {
+      const N = $('#nsN'); setTimeout(() => N.focus(), 30);
+      const go = async () => {
+        const name = N.value.trim() || 'Shared'; $('#nsGo').disabled = true;
+        const { data: s, error } = await sb.from('spaces').insert({ owner: user.id, kind: 'folder', name }).select().single();
+        if (error){ $('#nsGo').disabled = false; toast(error.message); return; }
+        const sp = { ...s, folders: s.folders || [], members: [{ ...prof, role: 'owner' }] }; spaces.set(s.id, sp);
+        const f = folderFor(s); folders.push(f); close();
+        if (open) closeItem(); view = f.id; render(); share(f);
+      };
+      $('#nsGo').onclick = go; N.onkeydown = e => { if (e.key === 'Enter') go(); }; $('#nsC').onclick = close;
+    });
+  }
+  function addSub(sec, name){
+    const sp = spaces.get(sec.spaceId); if (!sp) return null;
+    let nm = name || 'New Folder', n = 2; while (folders.some(f => f.parent === sec.id && f.name === nm)) nm = `${name || 'New Folder'} ${n++}`;
+    const subId = Math.random().toString(36).slice(2, 10);
+    const f = { id: sec.id + '/' + subId, name: nm, icon: 'folder', shared: true, spaceId: sp.id, sub: subId, parent: sec.id };
+    const last = folders.reduce((k, x, i) => (x.id === sec.id || x.parent === sec.id) ? i : k, folders.length - 1);
+    folders.splice(last + 1, 0, f); return f;
+  }
+  // turn one of your own folders into a folder inside a shared section (its items become shared)
+  function moveInto(local, sec){
+    const f = addSub(sec, local.name); if (!f) return;
+    items.filter(i => i.folder === local.id).forEach(i => i.folder = f.id);
+    folders = folders.filter(x => x !== local);
+    if (view === local.id) view = f.id;
+    render(); toast(`“${local.name}” is now shared in ${sec.name}`);
   }
 
   // styles
   const css = document.createElement('style');
   css.textContent = `
 .cav{display:inline-grid;place-items:center;border-radius:50%;flex:none !important;color:#fff;font-weight:600;background-size:cover;background-position:center;text-transform:uppercase}
+.shh{display:flex;align-items:center;justify-content:space-between;padding-right:4px!important}.shh .shadd{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;color:var(--muted)}.shh .shadd:hover{background:rgba(255,255,255,.08);color:#fff}.shh .shadd svg{width:13px;height:13px}
+.nav.csub{padding-left:30px}.nav.csub svg{width:13px;height:13px}
+.nav.shhint{color:var(--muted)}
 .nav .cstack{display:flex;flex:none;margin-right:4px;overflow:visible}.nav .cstack .cav{flex:none;margin-left:-5px;border:1.5px solid #18181b;overflow:hidden;white-space:nowrap}
 .cface{display:flex;align-items:center;gap:0;margin-right:6px}.cface .cav{margin-left:-6px;border:2px solid #141418}.cface small{margin-left:8px;font-size:11.5px;color:var(--muted)}
 .cmeta{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:11.5px;color:var(--muted);margin:-6px 0 14px}
@@ -705,6 +773,7 @@ const Collab = (() => {
       else { await sb.from('space_members').delete().eq('space_id', sp.id).eq('user_id', user.id); removeSpaceLocal(sp.id, `You left “${sp.name}”`); }
     },
     isOwner: f => spaces.get(f.spaceId)?.owner === user?.id,
+    newSection, addSub, moveInto, sections: () => folders.filter(f => f.shared && !f.sub && spaces.get(f.spaceId)?.kind === 'folder'),
     enabled: () => enabled, ready: () => ready, boot, signOut, updateProfile, share, attach, detach, sideHTML, reconcile,
     me: () => prof, spaceOf: it => it && it.space ? spaces.get(it.space) : null
   };

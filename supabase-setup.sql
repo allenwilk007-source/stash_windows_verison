@@ -132,4 +132,7 @@ grant execute on function public.is_member(uuid) to authenticated;
 -- rich notes (pages with blocks + free objects)
 alter table public.space_items add column if not exists doc jsonb;
 alter table public.item_history add column if not exists doc jsonb;
+-- shared sections: folders inside a shared space
+alter table public.spaces add column if not exists folders jsonb not null default '[]'::jsonb;
+alter table public.space_items add column if not exists sub text;
 select 'stash setup ok' as result;
