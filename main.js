@@ -249,6 +249,34 @@ app.whenReady().then(() => {
     return r;
   });
   ipcMain.handle('ai:creds', () => AI.creds());
+  // ---- sign-in links: the email link opens http://127.0.0.1:51789/auth, which hands the session to Stash ----
+  let authServer = null;
+  ipcMain.handle('auth:listen', () => {
+    if (authServer) return true;
+    const http = require('http');
+    authServer = http.createServer((req, res) => {
+      if (req.method === 'POST' && req.url === '/token'){
+        let b = ''; req.on('data', d => { b += d; if (b.length > 20000) req.destroy(); });
+        req.on('end', () => {
+          try { const t = JSON.parse(b); if (t.access_token && t.refresh_token){ win.webContents.send('auth-tokens', t); showMain(); } } catch (e) {}
+          res.writeHead(204); res.end();
+        });
+        return;
+      }
+      if (req.url.startsWith('/auth')){
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        res.end(`<!doctype html><meta charset="utf-8"><title>Stash</title><body style="margin:0;height:100vh;display:grid;place-items:center;background:#141416;color:#f2f2f3;font:15px -apple-system,system-ui,sans-serif"><div style="text-align:center"><div style="width:46px;height:46px;border-radius:50%;margin:0 auto 14px;background:radial-gradient(circle at 32% 28%,#fff6d8,#f3dca0 18%,#7fa8f0 46%,#2c58c8 72%,#14204a)"></div><h2 id="h" style="margin:0 0 6px">Signing you in…</h2><p id="p" style="color:#999;margin:0">One moment.</p></div>
+<script>const q=new URLSearchParams(location.hash.slice(1)+'&'+location.search.slice(1));const at=q.get('access_token'),rt=q.get('refresh_token'),er=q.get('error_description');
+if(at&&rt){fetch('/token',{method:'POST',body:JSON.stringify({access_token:at,refresh_token:rt})}).then(()=>{h.textContent="You're signed in";p.textContent='Head back to Stash — you can close this tab.';history.replaceState(null,'','/auth')})}
+else{h.textContent="That link didn't work";p.textContent=er||'It may have expired. Go back to Stash and send a new code.'}</script></body>`);
+        return;
+      }
+      res.writeHead(404); res.end();
+    });
+    authServer.on('error', () => { authServer = null; });
+    authServer.listen(51789, '127.0.0.1');
+    return true;
+  });
   // ---- uploaded videos/docs live as real files on disk ----
   const filesDir = () => { const d = path.join(app.getPath('userData'), 'files'); fs.mkdirSync(d, { recursive: true }); return d; };
   const destFor = name => path.join(filesDir(), Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + '-' + String(name || 'file').replace(/[^\w.\- ]+/g, '_').slice(-80));

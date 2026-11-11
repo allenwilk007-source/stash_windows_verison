@@ -563,7 +563,10 @@ body.native .island,body.native #zoom{display:none}
 <div class="ctx" id="ctx"></div>
 <input type="file" id="file" multiple hidden>
 
+<script src="supabase.js"></script>
+<script src="collab.js"></script>
 <script>
+if (typeof Collab === 'undefined') window.Collab = { enabled: () => false, ready: () => false, boot: async () => false, sideHTML: () => '', reconcile(){}, attach(){}, detach(){}, share(){}, signOut(){}, updateProfile: async () => null, me: () => null, spaceOf: () => null, removeFolder: async () => {}, isOwner: () => false };
 /* =========================================================
    1. Background — dark field with a slowly moving blue/cream
       horizon glow rising from the bottom-right corner
@@ -647,6 +650,8 @@ function scene(seed, p){
 const PAL = [['#1d2b64','#f8cdda','#fff4e0','#6b5b95','#3d3561','#1e1a33'],['#0f2027','#2c5364','#d6f0ff','#20414f','#142c36','#0a1a20'],['#ff9a5a','#ffd3a5','#fff6e5','#c4624a','#8e3b36','#4a1f24'],['#0b0b12','#3a1c71','#ffaf7b','#4b2a6b','#2c1745','#140b22'],['#a1c4fd','#c2e9fb','#ffffff','#5f8fb4','#3b6584','#203b52'],['#134e5e','#71b280','#f4ffe0','#2e6b55','#1d4a3c','#0e2a22']];
 
 const ICON = {
+  users:'<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.2c2.6.2 4.4 1.8 5 4.8"/>',
+  share:'<path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>',
   sort:'<path d="M4 13l2.5-8h11L20 13"/><path d="M4 13v6h16v-6h-5l-1.5 2.5h-3L9 13z"/>',
   link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
   up:'<path d="M12 19V5M6 11l6-6 6 6"/>', down:'<path d="M12 5v14M6 13l6 6 6-6"/>', edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/>', trash:'<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>', upload:'<path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/>',
@@ -721,7 +726,7 @@ function renderSide(){
   const count = id => id === 'home' || id === 'agent' || id === 'sort' || id === 'account' ? '' : id === 'all' ? items.length : id === 'starred' ? items.filter(i => i.star).length : id === 'recent' ? items.filter(i => now - i.t < 7 * day).length : items.filter(i => i.folder === id).length;
   const row = (id, name, icon, droppable) => `<button class="nav ${view === id ? 'on' : ''}" data-v="${id}" ${droppable ? 'data-drop="1" draggable="true" title="Drag to reorder · right-click for options"' : ''}>${svg(icon)}<span>${esc(name)}</span><em>${count(id)}</em>${droppable ? '<i class="more" data-more="1">•••</i>' : ''}</button>`;
   $('#side').innerHTML = `<h6>Library</h6>` + row('home', 'Home', 'home') + row('agent', 'Ask Stash', 'spark') + row('sort', 'Smart Sort', 'sort') + row('all', 'All Items', 'all') + row('starred', 'Starred', 'star') + row('recent', 'Recent', 'recent') +
-    `<h6>Folders</h6>` + folders.map(f => row(f.id, f.name, f.icon, true)).join('') +
+    `<h6>Folders</h6>` + folders.filter(f => !f.shared).map(f => row(f.id, f.name, f.icon, true)).join('') + Collab.sideHTML(row) +
     `<button class="nav newf" id="newFolder">${svg('plus')}<span>New Folder</span></button>` +
     (Account.me() ? `<button class="acct ${view === 'account' ? 'on' : ''}" data-v="account">${Account.avatar(Account.me())}<span class="nm2"><b>${esc(Account.me().name)}</b><small>@${esc(Account.me().username)}</small></span></button>` : '');
   $('#icount').textContent = `${items.length} items`;
@@ -759,6 +764,7 @@ const render = () => {
   if (!atAgent) Agent.hide();
   if (atSort && !SortView.active()) SortView.show();
   if (!atSort && SortView.active()) SortView.hide();
+  if (Collab.ready()) setTimeout(() => Collab.reconcile(), 0);
 };
 
 /* =========================================================
@@ -772,6 +778,7 @@ function openItem(it){
     <label class="ib">${svg('folder').replace('<svg', '<svg width="13" height="13"')}<select id="pMove">${folders.map(f => `<option value="${f.id}" ${f.id === it.folder ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}</select></label>
     <button class="ib" id="pStar">${it.star ? '★ Starred' : '☆ Star'}</button>
     ${it.url ? `<a class="ib" href="${it.url}" download="${esc(it.fname || it.title)}">↓ Download</a>` : ''}
+    ${Collab.enabled() ? `<button class="ib" id="pShare">${it.space ? `${svg('users').replace('<svg', '<svg width="13" height="13"')} Shared` : 'Share'}</button>` : ''}
     <button class="ib" id="pDel">Delete</button>`;
   const info = `<div class="info"><div><h2>${esc(it.title)}</h2><small>${esc(F.name)} · ${KIND[it.type]} · ${fmtDate(it.t)}</small></div><small>${fmtSize(it.size)}${it.dur ? ' · ' + esc(it.dur) : ''}</small></div>`;
   let b;
@@ -797,6 +804,7 @@ function openItem(it){
     t.oninput = () => { it.title = t.value; it.t = Date.now(); Persist.dirty(); };
     const fit = () => { x.style.height = 'auto'; x.style.height = Math.max(340, x.scrollHeight + 8) + 'px'; };
     x.oninput = () => { it.body = x.value; it.t = Date.now(); Persist.dirty(); fit(); };
+    x.addEventListener('collab-fit', fit);
     fit(); requestAnimationFrame(fit);
     setTimeout(() => { fit(); (it.title ? x : t).focus({preventScroll: true}); }, 350);
   }
@@ -810,6 +818,8 @@ function openItem(it){
     const v = document.getElementById('pvVid');
     if (v) v.onerror = () => { $('#pvbody').innerHTML = missingVideo(it); wireReAdd(it); };
   }
+  if ($('#pShare')) $('#pShare').onclick = () => Collab.share(it.space ? folders.find(f => f.id === it.folder) : it);
+  if (it.rid) setTimeout(() => { if (open === it) Collab.attach(it); }, 0);
   $('#pBack').onclick = closeItem;
   $('#pStar').onclick = () => { it.star = !it.star; openItem(it); renderSide(); };
   $('#pMove').onchange = e => { Sorter.learn(it, it.folder, e.target.value, 'moved'); it.folder = e.target.value; toast(`Moved to ${folders.find(f => f.id === it.folder).name}`); render(); };
@@ -837,6 +847,7 @@ function wireReAdd(it){
   };
 }
 function closeItem(){
+  Collab.detach();
   if (open && open.type === 'note' && !open.title && !open.body) items = items.filter(x => x !== open);
   $('#pvbody').querySelectorAll('video').forEach(v => v.pause());
   $('#pv').classList.remove('show'); $('#main').classList.remove('viewing'); open = null; render();
@@ -1016,11 +1027,12 @@ function folderMenu(f, x, y){
   menu(x, y, [
     {icon: 'folder', label: 'Open', run: () => { if (open) closeItem(); view = f.id; render(); }},
     {icon: 'edit', label: 'Rename', run: () => renameFolder(f)},
+    ...(Collab.enabled() ? [{icon: 'users', label: f.shared ? 'People…' : 'Share…', sub: f.shared ? 'Invite or remove people' : 'Invite people by @username', run: () => Collab.share(f)}] : []),
     '-',
     {icon: 'up', label: 'Move up', disabled: i === 0, run: () => moveFolder(f, -1)},
     {icon: 'down', label: 'Move down', disabled: i === folders.length - 1, run: () => moveFolder(f, 1)},
     '-',
-    {icon: 'trash', label: 'Delete folder', danger: true, run: () => deleteFolder(f)},
+    f.shared ? {icon: 'trash', label: Collab.isOwner(f) ? 'Delete for everyone' : 'Leave folder', danger: true, run: () => dialog(`<h3>${Collab.isOwner(f) ? 'Delete' : 'Leave'} “${esc(f.name)}”?</h3><p>${Collab.isOwner(f) ? 'Everyone loses access and everything in it is deleted.' : "You'll lose access until someone invites you again."}</p><div class="row"><button class="btn" id="dC">Cancel</button><button class="btn red" id="dY">${Collab.isOwner(f) ? 'Delete for everyone' : 'Leave'}</button></div>`, close => { $('#dC').onclick = close; $('#dY').onclick = () => { close(); Collab.removeFolder(f); }; })} : {icon: 'trash', label: 'Delete folder', danger: true, run: () => deleteFolder(f)},
   ]);
 }
 $('#folderMore').onclick = e => { const f = folders.find(f => f.id === view); if (!f) return; const r = e.currentTarget.getBoundingClientRect(); folderMenu(f, r.right - 190, r.bottom + 6); };
@@ -1845,7 +1857,7 @@ const Persist = (() => {
   const N = window.stashNative; let dirty = false, timer = null;
   const toBlobURL = d => { try { const [h, b] = d.split(','), mime = h.slice(5).split(';')[0], bin = atob(b), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return URL.createObjectURL(new Blob([a], {type: mime})); } catch (e) { return null; } };
   function snapshot(){
-    return JSON.stringify({v: 1, profile: Account.get(), folders, lessons: Sorter.getLessons(), items: items.map(({url, ...rest}) => rest)});
+    return JSON.stringify({v: 1, profile: Account.get(), folders: folders.filter(f => !f.shared), lessons: Sorter.getLessons(), items: items.filter(i => !i.space && !i.rid).map(({url, ...rest}) => rest)});
   }
   function save(){ if (!N || !dirty) return; dirty = false; N.save(snapshot()); }
   function restore(json){
@@ -2102,7 +2114,7 @@ const Account = (() => {
       <div class="achero" id="aHero">${avatar(profile)}<div><h1>${esc(profile.name)}</h1><p>@${esc(profile.username)} · joined ${new Date(profile.created || Date.now()).toLocaleDateString(undefined, {month: 'long', year: 'numeric'})}</p></div></div>
       <div class="acstats"><div><b>${items.length}</b><small>Items</small></div><div><b>${folders.length}</b><small>Folders</small></div><div><b>${notes}</b><small>Notes</small></div></div>
       <div class="accard"><h3>Profile</h3>${formHTML(draft, 'a')}<div class="acrow"><small id="aMsg"></small><button class="btn w" id="aSave" disabled>Save changes</button></div></div>
-      <div class="accard"><h3>Session</h3><div class="acrow"><small>Signing out locks Stash until you sign back in. Your stuff stays on this Mac.</small><button class="btn" id="aOut">Sign out</button></div></div>
+      <div class="accard"><h3>Session</h3><div class="acrow"><small>${Collab.ready() ? 'Signed in online — your @username is reserved for you everywhere. Your private stuff stays on this Mac.' : 'Signing out locks Stash until you sign back in. Your stuff stays on this Mac.'}</small><button class="btn" id="aOut">Sign out</button></div></div>
     </div>`;
     let valid = true;
     const dirtyCheck = () => $('#aSave').disabled = !valid || (draft.name.trim() === profile.name && draft.username === profile.username && draft.color === profile.color && draft.photo === profile.photo);
@@ -2110,7 +2122,12 @@ const Account = (() => {
       if (redraw){ $('#aHero').querySelector('.av').outerHTML = avatar(draft); $('#aC').querySelectorAll('.sw8').forEach(s => s.classList.toggle('on', !draft.photo && s.dataset.c === draft.color)); $('#aP').textContent = draft.photo ? 'Change photo' : 'Upload photo'; dirtyCheck(); return; }
       valid = v; dirtyCheck();
     });
-    $('#aSave').onclick = () => {
+    $('#aSave').onclick = async () => {
+      if (Collab.ready()){
+        $('#aSave').disabled = true;
+        const err = await Collab.updateProfile({name: draft.name.trim(), username: draft.username, color: draft.color, photo: draft.photo});
+        if (err){ $('#aMsg').textContent = err; $('#aMsg').style.color = '#ff9d94'; $('#aSave').disabled = false; return; }
+      }
       Object.assign(profile, {name: draft.name.trim(), username: draft.username, color: draft.color, photo: draft.photo});
       store(); renderSide(); renderPage(); toast('Profile saved');
     };
@@ -2119,6 +2136,7 @@ const Account = (() => {
 
   /* ---------- start ---------- */
   function boot(){
+    if (Collab.enabled()){ Collab.boot(); return; }
     let wasIn = false; try { wasIn = sessionStorage.getItem('stash-in') === '1'; } catch (e) {}
     if (!profile) gate('create');
     else if (window.stashNative || wasIn) signedIn = true;   // the Mac app keeps you signed in until you sign out
@@ -2130,7 +2148,8 @@ const Account = (() => {
   return {
     me: () => profile, get: () => profile, avatar, renderPage, boot,
     set: p => { if (p) profile = p; },
-    signOut: () => { if (profile){ profile.signedOut = true; store(); } _signOut(); },
+    signOut: () => { if (Collab.enabled()){ Collab.signOut(); return; } if (profile){ profile.signedOut = true; store(); } _signOut(); },
+    _enter: () => { store(); signIn(); },
     signedIn: () => signedIn,
     _markIn: () => { if (profile && profile.signedOut){ delete profile.signedOut; store(); } }
   };

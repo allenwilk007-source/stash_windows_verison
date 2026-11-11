@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('stashNative', {
   aiCreds: () => ipcRenderer.invoke('ai:creds'),
   onAICreds: cb => ipcRenderer.on('ai-creds', (e, c) => cb(c)),
   aiStatus: () => ipcRenderer.invoke('ai:status'),
+  authListen: () => ipcRenderer.invoke('auth:listen'),
+  onAuthTokens: cb => ipcRenderer.on('auth-tokens', (e, t) => cb(t)),
   // copy an uploaded file into Stash's own files folder → returns a file:// URL
   storeFile: async file => {
     let p = ''; try { p = webUtils.getPathForFile(file); } catch (e) {}
