@@ -152,6 +152,7 @@ const Collab = (() => {
     Object.assign(it, { rid: row.id, space: row.space_id, folder: sid(row.space_id), type: row.type, title: row.title, body: row.body, link: row.link || undefined,
       ext: row.ext || undefined, mime: row.mime || undefined, fname: row.fname || undefined, size: row.size || undefined, dur: row.dur || undefined,
       t: Date.parse(row.updated_at), updatedBy: row.updated_by, filePath: row.file_path || undefined, thumb: row.thumb || it.thumb });
+    if (row.doc && typeof row.doc === 'object') it.doc = row.doc; else if (row.type === 'note' && !row.doc && it.doc && !(live && live.rid === row.id)) delete it.doc;
     const u = row.file_path && urls[row.file_path];
     if (u){ if (row.type === 'image'){ it.src = u; it.url = u; } else if (row.type === 'video'){ it.vsrc = u; it.url = u; it.poster = row.thumb || it.poster; } else { it.url = u; it.data = undefined; } }
     else if (row.type === 'image' && !it.src) it.src = row.thumb;
@@ -190,7 +191,7 @@ const Collab = (() => {
         const mine = byRid.get(row.id); if (mine && pending.has(mine)) return;
         const editing = live && live.rid === row.id;
         const urls = row.file_path && !byRid.get(row.id)?.url ? await signed([row.file_path]) : {};
-        const it = toItem(editing ? { ...row, body: byRid.get(row.id)?.body ?? row.body, title: byRid.get(row.id)?.title ?? row.title } : row, urls);
+        const it = toItem(editing ? { ...row, body: byRid.get(row.id)?.body ?? row.body, title: byRid.get(row.id)?.title ?? row.title, doc: byRid.get(row.id)?.doc ?? row.doc } : row, urls);
         if (!editing && open !== it) render();
         else if (!editing) renderSide();
       })
@@ -233,6 +234,7 @@ const Collab = (() => {
     const rid = crypto.randomUUID(); it.rid = rid; it.space = spaceId; byRid.set(rid, it); known.add(rid);
     try {
       const row = { id: rid, space_id: spaceId, type: it.type === 'link' ? 'link' : it.type, title: it.title || '', body: it.body || '', link: it.link || null, ext: it.ext || null, mime: it.mime || null, fname: it.fname || null, size: it.size || null, dur: it.dur || null, created_by: user.id, updated_by: user.id };
+      if (it.type === 'note' && it.doc){ await shareMedia(it.doc, spaceId); row.doc = it.doc; row.body = window.Pad ? Pad.toText(it.doc) : row.body; }
       if (it.type === 'image') row.thumb = it.thumb && it.thumb.length < 400000 ? it.thumb : (it.src ? await imageThumb(it.src, 480).catch(() => null) : null);
       if (it.type === 'video') row.thumb = it.poster || null;
       if (['image', 'video', 'doc'].includes(it.type) && !it.sections){
@@ -254,6 +256,27 @@ const Collab = (() => {
       it.folder = folders.find(f => !f.shared)?.id || 'notes'; render();
     } finally { pending.delete(it); }
   }
+  // pictures/videos inside a note live in the shared bucket so everyone in the folder can see them
+  function noteMedia(d){ const out = []; (d.blocks || []).forEach(b => { if (b.t === 'img') out.push(b); }); (d.objs || []).forEach(o => { if (o.k === 'image' || o.k === 'video') out.push(o); }); if (d.meta && d.meta.cover && typeof d.meta.cover === 'object') out.push(d.meta.cover); return out; }
+  async function putNoteFile(blob, spaceId, name){
+    const path = `${spaceId}/note/${crypto.randomUUID()}-${String(name || 'file').replace(/[^\w.\- ]+/g, '_').slice(-60)}`;
+    const { error } = await sb.storage.from('shared').upload(path, blob, { contentType: blob.type || 'application/octet-stream' });
+    if (error) throw error; return path;
+  }
+  async function shareMedia(d, spaceId){
+    for (const m of noteMedia(d)){
+      if (m.path && m.path.startsWith(spaceId + '/')) continue;
+      const src = m.src || (m.path ? (await signed([m.path]))[m.path] : null); if (!src) continue;
+      try { const b = await (await fetch(src)).blob(); m.path = await putNoteFile(b, spaceId, 'media.' + ((b.type.split('/')[1] || 'bin').replace('jpeg', 'jpg'))); } catch (e) {}
+    }
+  }
+  async function localMedia(d){
+    for (const m of noteMedia(d)){
+      if (!m.path) continue;
+      try { const u = (await signed([m.path]))[m.path]; if (!u) continue; const b = await (await fetch(u)).blob();
+        m.src = window.stashNative?.storeFile ? await window.stashNative.storeFile(new File([b], 'note-media.' + (b.type.split('/')[1] || 'bin'), { type: b.type })) : await fileToDataURL(b); delete m.path; } catch (e) {}
+    }
+  }
   async function makeLocal(it){
     // moved out of a shared folder → keep a private copy, remove it from the shared one
     const rid = it.rid; byRid.delete(rid); known.delete(rid);
@@ -267,6 +290,7 @@ const Collab = (() => {
         }
       }
     } catch (e) {}
+    if (it.type === 'note' && it.doc) await localMedia(it.doc);
     delete it.rid; delete it.space; delete it.filePath; delete it.updatedBy;
     it.id = uid();
     await sb.from('space_items').delete().eq('id', rid);
@@ -281,7 +305,7 @@ const Collab = (() => {
         if (pending.has(it)) continue;
         if (!it.rid && sharedIds.has(it.folder)) upload(it);
         else if (it.rid && it.folder !== sid(it.space)){
-          if (sharedIds.has(it.folder) && !it.filePath){ const ns = folders.find(f => f.id === it.folder).spaceId; await sb.from('space_items').update({ space_id: ns, updated_by: user.id }).eq('id', it.rid); it.space = ns; }
+          if (sharedIds.has(it.folder) && !it.filePath){ const ns = folders.find(f => f.id === it.folder).spaceId, patch = { space_id: ns, updated_by: user.id }; if (it.type === 'note' && it.doc){ await shareMedia(it.doc, ns); patch.doc = it.doc; } await sb.from('space_items').update(patch).eq('id', it.rid); it.space = ns; }
           else if (sharedIds.has(it.folder)){ const old = it.rid; byRid.delete(old); known.delete(old); delete it.rid; await sb.from('space_items').delete().eq('id', old); upload(it); }
           else await makeLocal(it);
         }
@@ -375,6 +399,7 @@ const Collab = (() => {
   function attach(it){
     detach();
     if (!ready || !it.rid) return;
+    if (it.type === 'note' && window.Pad && Pad.current && Pad.current.it === it) return attachPad(it, Pad.current);
     const sp = spaces.get(it.space);
     const ta = $('#nB'), ti = $('#nT'), body = $('#pvbody');
     const isNote = it.type === 'note' && ta;
@@ -523,6 +548,80 @@ const Collab = (() => {
     if (isNote) ta.addEventListener('collab-fit', () => ta.dispatchEvent(new Event('input-fit')));
     // history drawer
     hist.onclick = () => openHistory(it, v => { setText(v.body); if (ti){ ti.value = v.title || ti.value; } chan.send({ type: 'broadcast', event: 'full', payload: { text: v.body } }); live.edited = true; save(true); toast('Restored that version'); });
+    drawFace(); drawMeta();
+  }
+  const stable = v => Array.isArray(v) ? '[' + v.map(stable).join(',') + ']' : v && typeof v === 'object' ? '{' + Object.keys(v).sort().filter(k => v[k] !== undefined).map(k => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}' : JSON.stringify(v);
+  const hashStr = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; };
+  function attachPad(it, pad){
+    const sp = spaces.get(it.space), body = $('#pvbody'), bar = $('#pvbar');
+    const face = document.createElement('span'); face.className = 'cface'; bar.insertBefore(face, bar.querySelector('.sp').nextSibling);
+    const hist = document.createElement('button'); hist.className = 'ib'; hist.textContent = 'History'; bar.insertBefore(hist, face.nextSibling);
+    const meta = document.createElement('div'); meta.className = 'cmeta'; pad.metaSlot().appendChild(meta);
+    const ov = document.createElement('div'); ov.style.display = 'none'; body.appendChild(ov);
+    live = { rid: it.rid, it, pad, peers: new Map(), lastSnap: 0, ov, meta, face, body, edited: false };
+    const chan = sb.channel('item:' + it.rid, { config: { presence: { key: user.id }, broadcast: { self: false } } });
+    live.chan = chan;
+    const alive = () => live && live.chan === chan;
+    const me = () => ({ id: user.id, name: prof.display_name, username: prof.username, color: prof.color || COLORS[0], photo: prof.photo });
+    let lastLocal = 0;
+    const sendFull = () => chan.send({ type: 'broadcast', event: 'dfull', payload: { from: user.id, doc: pad.doc(), title: it.title } });
+    chan.on('presence', { event: 'sync' }, () => {
+      if (!alive()) return;
+      const st = chan.presenceState(), ids = new Set(Object.keys(st));
+      for (const id of [...live.peers.keys()]) if (!ids.has(id)) live.peers.delete(id);
+      for (const id of ids){ if (id === user.id) continue; const p = st[id][0]; if (!live.peers.has(id)) live.peers.set(id, { ...p }); else Object.assign(live.peers.get(id), p); }
+      drawFace(); drawPeers();
+    });
+    chan.on('broadcast', { event: 'dop' }, ({ payload: o }) => { if (!alive()) return; pad.apply(o.op); if (o.op.t === 'ti') it.title = o.op.v; bump(o.from, { typing: Date.now() }); });
+    chan.on('broadcast', { event: 'dfull' }, ({ payload: o }) => { if (!alive()) return; if (o.title != null) it.title = o.title; pad.setDoc(o.doc, true); });
+    chan.on('broadcast', { event: 'needfull' }, () => { if (alive()) sendFull(); });
+    chan.on('broadcast', { event: 'cur' }, ({ payload: o }) => { if (alive()) bump(o.from, o); });
+    chan.on('broadcast', { event: 'hash' }, ({ payload: o }) => {
+      if (!alive() || Date.now() - lastLocal < 1500) return;
+      if (o.h !== hashStr(stable(pad.doc())) && user.id < o.from) sendFull();
+    });
+    chan.subscribe(async s => { if (s === 'SUBSCRIBED') await chan.track({ ...me(), at: Date.now() }); });
+    function bump(id, data){ const p = live.peers.get(id) || {}; Object.assign(p, data); live.peers.set(id, p); drawPeers(); drawFace(); }
+    pad.onOp(op => { if (!alive()) return; lastLocal = Date.now(); live.edited = true; chan.send({ type: 'broadcast', event: 'dop', payload: { from: user.id, op } }); scheduleSave(); });
+    pad.onCursor(c => {
+      if (c.needFull){ chan.send({ type: 'broadcast', event: 'needfull', payload: { from: user.id } }); return; }
+      if (alive()) chan.send({ type: 'broadcast', event: 'cur', payload: { from: user.id, ...c } });
+    });
+    // pictures added to a shared note go to the shared bucket
+    pad.hooks.upload = async f => { const path = await putNoteFile(f, it.space, f.name); const u = (await signed([path]))[path]; return { path, src: u }; };
+    pad.hooks.resolve = async p => (await signed([p]))[p];
+    if (noteMedia(pad.doc()).some(m => m.path)) pad.setDoc(JSON.parse(JSON.stringify(pad.doc())), true);
+    let saveT = null;
+    function scheduleSave(){ clearTimeout(saveT); saveT = setTimeout(save, 700); }
+    async function save(final){
+      if (!live || live.rid !== it.rid) return;
+      const d = pad.doc(); it.body = Pad.toText(d);
+      await sb.from('space_items').update({ title: it.title || '', body: it.body, doc: d, updated_by: user.id, updated_at: new Date().toISOString() }).eq('id', it.rid);
+      it.updatedBy = user.id; it.t = Date.now(); drawMeta();
+      if (live && live.edited && (final || Date.now() - live.lastSnap > 30000)){
+        live.lastSnap = Date.now(); live.edited = false;
+        await sb.from('item_history').insert({ item_id: it.rid, user_id: user.id, title: it.title || '', body: it.body, doc: d });
+      }
+      chan.send({ type: 'broadcast', event: 'hash', payload: { from: user.id, h: hashStr(stable(d)) } });
+    }
+    live.save = save;
+    const p1 = p => (p.name || '').split(' ')[0];
+    function drawFace(){
+      if (!alive()) return;
+      const ps = [...live.peers.values()];
+      face.innerHTML = ps.length ? ps.slice(0, 5).map(p => avatarOf({ display_name: p.name, username: p.username, color: p.color, photo: p.photo }, 24, true)).join('') + `<small>${ps.length === 1 ? esc(p1(ps[0])) + ' is here' : ps.length + ' here'}</small>` : '';
+      drawMeta();
+    }
+    function drawMeta(){
+      if (!alive()) return;
+      const typing = [...live.peers.values()].filter(p => p.typing && Date.now() - p.typing < 2500), by = nameOf(it.updatedBy);
+      meta.innerHTML = `<span class="cshare">${svg('users')} Shared${sp ? ` · ${sp.members.length} people` : ''}</span>` +
+        (typing.length ? `<span class="ctyping" style="color:${typing[0].color}">${esc(p1(typing[0]))}${typing.length > 1 ? ` +${typing.length - 1}` : ''} is editing…</span>` : `<span>Edited by ${by ? esc(by.id === user.id ? 'you' : by.display_name) : '—'} · ${ago(it.t)}</span>`);
+    }
+    function drawPeers(){ if (alive()) pad.drawPeers([...live.peers.values()]); }
+    live.redraw = drawPeers;
+    live.tick = setInterval(() => { drawMeta(); drawPeers(); }, 1000);
+    hist.onclick = () => openHistory(it, v => { if (v.title) it.title = v.title; pad.setDoc(v.doc || Pad.fromText(v.body || ''), true); sendFull(); live.edited = true; save(true); toast('Restored that version'); });
     drawFace(); drawMeta();
   }
   async function detach(){

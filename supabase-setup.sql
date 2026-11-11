@@ -129,4 +129,7 @@ alter table public.space_members replica identity full;
 grant usage on schema public to authenticated;
 grant select, insert, update, delete on public.profiles, public.spaces, public.space_members, public.space_items, public.item_history to authenticated;
 grant execute on function public.is_member(uuid) to authenticated;
+-- rich notes (pages with blocks + free objects)
+alter table public.space_items add column if not exists doc jsonb;
+alter table public.item_history add column if not exists doc jsonb;
 select 'stash setup ok' as result;

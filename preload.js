@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('stashNative', {
     if (p) return ipcRenderer.invoke('files:copy', p, file.name);
     return ipcRenderer.invoke('files:write', file.name, new Uint8Array(await file.arrayBuffer()));
   },
+  savePDF: name => ipcRenderer.invoke('pdf:save', name),
   aiSetupLocal: () => ipcRenderer.invoke('ai:setupLocal'),
   onAISetup: cb => ipcRenderer.on('ai:setup', (e, p) => cb(p)),
   onAIStatus: cb => ipcRenderer.on('ai-status', (e, s) => cb(s)),

@@ -280,6 +280,13 @@ else{h.textContent="That link didn't work";p.textContent=er||'It may have expire
   // ---- uploaded videos/docs live as real files on disk ----
   const filesDir = () => { const d = path.join(app.getPath('userData'), 'files'); fs.mkdirSync(d, { recursive: true }); return d; };
   const destFor = name => path.join(filesDir(), Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + '-' + String(name || 'file').replace(/[^\w.\- ]+/g, '_').slice(-80));
+  ipcMain.handle('pdf:save', async (e, name) => {
+    const w = BrowserWindow.fromWebContents(e.sender);
+    const { canceled, filePath } = await dialog.showSaveDialog(w, { defaultPath: path.join(app.getPath('documents'), String(name || 'Note').replace(/[\/:*?"<>|]+/g, '-').slice(0, 80) + '.pdf'), filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    if (canceled || !filePath) return false;
+    const data = await e.sender.printToPDF({ printBackground: true, pageSize: 'Letter', margins: { marginType: 'default' } });
+    fs.writeFileSync(filePath, data); shell.showItemInFolder(filePath); return true;
+  });
   ipcMain.handle('files:copy', (e, src, name) => { const d = destFor(name || path.basename(src)); fs.copyFileSync(src, d); return require('url').pathToFileURL(d).href; });
   ipcMain.handle('files:write', (e, name, bytes) => { const d = destFor(name); fs.writeFileSync(d, Buffer.from(bytes)); return require('url').pathToFileURL(d).href; });
   ipcMain.handle('ai:status', () => AI.status());

@@ -563,6 +563,7 @@ body.native .island,body.native #zoom{display:none}
 <div class="ctx" id="ctx"></div>
 <input type="file" id="file" multiple hidden>
 
+<script src="notes.js"></script>
 <script src="supabase.js"></script>
 <script src="collab.js"></script>
 <script>
@@ -775,14 +776,23 @@ function openItem(it){
   else if (it.type === 'link') b = `<div class="linkview"><div class="card" style="background:${linkBg(it)}"><b>${esc(domainOf(it.link))}</b><a href="${esc(it.link)}" target="_blank" rel="noopener">${esc(it.link)}</a></div>
       <a class="btn w open" href="${esc(it.link)}" target="_blank" rel="noopener">Open link ↗</a>
       <input id="lT" placeholder="Title" value="${esc(it.title)}"><textarea id="lB" placeholder="Notes about this link…">${esc(it.body || '')}</textarea></div>`;
-  else if (it.type === 'note') b = `<div class="editor"><input id="nT" placeholder="Title" value="${esc(it.title)}"><textarea id="nB" placeholder="Start writing…">${esc(it.body)}</textarea></div>`;
+  else if (it.type === 'note') b = window.Pad ? '<div class="padhost" style="position:absolute;inset:0"></div>' : `<div class="editor"><input id="nT" placeholder="Title" value="${esc(it.title)}"><textarea id="nB" placeholder="Start writing…">${esc(it.body)}</textarea></div>`;
   else if (it.url && (it.mime === 'application/pdf' || it.ext === 'PDF')) b = `<iframe class="frame" src="${it.url}"></iframe>`;
   else if (it.text != null) b = `<div class="docpage"><h2>${esc(it.title)}</h2><div class="sub">${esc(it.ext)} · ${fmtSize(it.size)}</div><pre>${esc(it.text)}</pre></div>`;
   else if (it.sections) b = `<div class="docpage"><h2>${esc(it.title)}</h2><div class="sub">${esc(it.ext)} · ${fmtSize(it.size)} · ${fmtDate(it.t)}</div>${it.sections.map(([h, p]) => `<h3>${esc(h)}</h3><p>${esc(p)}</p>`).join('')}</div>`;
   else b = `<div class="media"><div style="text-align:center;color:var(--muted);font-size:13px"><div style="font-size:16px;color:#fff;font-weight:600;margin-bottom:6px">${esc(it.fname || it.title)}</div>No preview for ${esc(it.ext)} files — use Download.</div></div>`;
+  if (window.Pad?.current) Pad.current.destroy();
   $('#pvbody').innerHTML = b;
+  $('#pvbody').classList.toggle('padmode', it.type === 'note' && !!window.Pad);
   $('#pv').classList.add('show'); $('#main').classList.add('viewing');
-  if (it.type === 'note'){
+  if (it.type === 'note' && window.Pad){
+    if (!app.classList.contains('big')){ app.classList.add('big'); app.dataset.autoBig = '1'; }
+    Pad.ensure(it);
+    Pad.mount($('.padhost'), it, {
+      onChange(remote){ it.t = Date.now(); it.body = Pad.toText(it.doc); if (!remote) Persist.dirty(); },
+      onTitle(v){ it.title = v; it.t = Date.now(); Persist.dirty(); }
+    });
+  } else if (it.type === 'note'){
     const t = $('#nT'), x = $('#nB');
     t.oninput = () => { it.title = t.value; it.t = Date.now(); Persist.dirty(); };
     const fit = () => { x.style.height = 'auto'; x.style.height = Math.max(340, x.scrollHeight + 8) + 'px'; };
@@ -831,7 +841,11 @@ function wireReAdd(it){
 }
 function closeItem(){
   Collab.detach();
-  if (open && open.type === 'note' && !open.title && !open.body) items = items.filter(x => x !== open);
+  if (window.Pad?.current){ Pad.current.destroy(); }
+  $('#pvbody').classList.remove('padmode');
+  if (app.dataset.autoBig){ app.classList.remove('big'); delete app.dataset.autoBig; }
+  if (open && open.type === 'note' && !open.title && (window.Pad && open.doc ? Pad.isEmpty(open) : !open.body)) items = items.filter(x => x !== open);
+  if (open && open.type === 'note' && open.doc && window.Pad) open.body = Pad.toText(open.doc);
   $('#pvbody').querySelectorAll('video').forEach(v => v.pause());
   $('#pv').classList.remove('show'); $('#main').classList.remove('viewing'); open = null; render();
 }
