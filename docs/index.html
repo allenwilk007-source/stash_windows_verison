@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stash for Mac</title>
+<meta name="description" content="Stash — one place for your notes, docs, images, videos and links. Free for Mac.">
+<meta property="og:title" content="Stash for Mac">
+<meta property="og:description" content="One place for your notes, docs, images, videos and links — with live collaboration.">
+<meta property="og:image" content="https://charliecurrin.github.io/stash/shot.jpg">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d0d0f;--text:#f2f2f3;--muted:rgba(255,255,255,.58);--faint:rgba(255,255,255,.36);--line:rgba(255,255,255,.1);--acc:#4f86e8}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.6;overflow-x:hidden}
+.glow{position:fixed;inset:0;z-index:-2;background:radial-gradient(1100px 650px at 85% 110%,rgba(79,134,232,.55),transparent 60%),radial-gradient(700px 500px at 100% 70%,rgba(244,197,140,.28),transparent 60%),radial-gradient(900px 600px at 0% -10%,rgba(139,92,246,.18),transparent 60%),var(--bg)}
+.grain{position:fixed;inset:0;z-index:-1;opacity:.12;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+.wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+nav{display:flex;align-items:center;justify-content:space-between;padding:22px 0}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;letter-spacing:-.01em}
+.brand img{width:30px;height:30px;border-radius:8px}
+nav a.gh{color:var(--muted);text-decoration:none;font-size:14px}
+nav a.gh:hover{color:#fff}
+.hero{text-align:center;padding:56px 0 30px}
+h1{font-size:clamp(38px,6.4vw,70px);line-height:1.04;letter-spacing:-.045em;font-weight:700}
+h1 span{color:rgba(255,255,255,.45)}
+.lead{max-width:600px;margin:20px auto 0;font-size:clamp(16px,2vw,19px);color:var(--muted)}
+.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:32px}
+.btn{display:inline-flex;align-items:center;gap:9px;height:48px;padding:0 22px;border-radius:12px;font:600 15px Inter,sans-serif;text-decoration:none;border:0;cursor:pointer}
+.btn.primary{background:#fff;color:#111;box-shadow:0 10px 40px rgba(255,255,255,.12)}
+.btn.primary:hover{transform:translateY(-1px)}
+.btn.ghost{background:rgba(255,255,255,.07);color:#fff;border:1px solid var(--line)}
+.note{margin-top:14px;font-size:13px;color:var(--faint)}
+.shot{margin:46px auto 0;border-radius:16px;overflow:hidden;border:1px solid var(--line);box-shadow:0 40px 120px rgba(0,0,0,.6);max-width:1000px}
+.shot img{display:block;width:100%;height:auto}
+section{padding:80px 0 0}
+h2{font-size:clamp(26px,4vw,38px);letter-spacing:-.03em;line-height:1.15;text-align:center}
+.sub{color:var(--muted);text-align:center;margin-top:10px}
+.install{max-width:720px;margin:34px auto 0;background:rgba(20,20,24,.75);border:1px solid var(--line);border-radius:18px;padding:26px;backdrop-filter:blur(14px)}
+.steps{list-style:none;counter-reset:s;display:flex;flex-direction:column;gap:22px}
+.steps li{counter-increment:s;display:grid;grid-template-columns:32px minmax(0,1fr);gap:14px}.steps li>div{min-width:0}
+.steps li:before{content:counter(s);width:32px;height:32px;border-radius:50%;background:rgba(79,134,232,.18);color:#9ab8ff;display:grid;place-items:center;font-weight:700;font-size:14px}
+.steps b{display:block;font-size:16px}
+.steps p{color:var(--muted);font-size:14.5px;margin-top:2px}
+kbd{font:600 12.5px Inter,sans-serif;background:rgba(255,255,255,.1);border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:1px 7px;color:#fff}
+.cmd{margin-top:10px;display:flex;align-items:stretch;border:1px solid rgba(255,255,255,.16);border-radius:12px;background:#09090b;overflow:hidden}
+.cmd code{flex:1;min-width:0;padding:13px 14px;font:13px/1.5 "SF Mono",ui-monospace,Menlo,monospace;color:#e4e4e7;overflow-x:auto;white-space:nowrap}
+.cmd button{flex:none;border:0;border-left:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font:600 13.5px Inter,sans-serif;padding:0 18px;cursor:pointer;min-width:92px}
+.cmd button:hover{background:rgba(255,255,255,.12)}
+.cmd button.ok{background:#16a34a}
+.small{font-size:13px;color:var(--faint);margin-top:18px;text-align:center}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:34px}
+.card{background:rgba(255,255,255,.035);border:1px solid var(--line);border-radius:16px;padding:20px}
+.card .ic{font-size:22px}
+.card b{display:block;margin-top:10px;font-size:15.5px}
+.card p{color:var(--muted);font-size:14px;margin-top:4px}
+.faq{max-width:720px;margin:30px auto 0;display:flex;flex-direction:column;gap:10px}
+details{background:rgba(255,255,255,.035);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+summary{cursor:pointer;font-weight:600;list-style:none;display:flex;justify-content:space-between;gap:10px}
+summary::-webkit-details-marker{display:none}
+summary:after{content:"+";color:var(--faint);font-weight:400;font-size:20px;line-height:1}
+details[open] summary:after{content:"–"}
+details p{color:var(--muted);font-size:14.5px;margin-top:8px}
+footer{padding:80px 0 40px;text-align:center;color:var(--faint);font-size:13px}
+footer a{color:var(--muted)}
+@media (max-width:760px){.grid{grid-template-columns:1fr}.install{padding:20px 16px}.cmd{flex-direction:column}.cmd button{border-left:0;border-top:1px solid rgba(255,255,255,.12);height:44px}}
+</style>
+</head>
+<body>
+<div class="glow"></div><div class="grain"></div>
+<div class="wrap">
+  <nav><div class="brand"><img src="icon.png" alt="">Stash</div><a class="gh" href="https://github.com/charliecurrin/stash">GitHub ↗</a></nav>
+
+  <header class="hero">
+    <h1>Everything you keep,<br><span>in one place.</span></h1>
+    <p class="lead">Notes, docs, images, videos and links: sorted for you, searchable, and shared live with your team. Free for Mac.</p>
+    <div class="cta"><a class="btn primary" href="#install"> Download for Mac</a><a class="btn ghost" href="#features">See what it does</a></div>
+    <div class="note">macOS · Apple Silicon & Intel · updates itself</div>
+    <div class="shot"><img src="shot.jpg" width="1280" height="800" alt="Stash showing a note with a checklist, a sticky note and shapes"></div>
+  </header>
+
+  <section id="install">
+    <h2>Install in under a minute</h2>
+    <p class="sub">One copy-paste. Stash installs itself into Applications and opens.</p>
+    <div class="install">
+      <ol class="steps">
+        <li><div><b>Open Terminal</b><p>Press <kbd>⌘</kbd> <kbd>Space</kbd>, type <b style="display:inline">Terminal</b>, and press <kbd>Return</kbd>.</p></div></li>
+        <li><div><b>Copy this and paste it into Terminal, then press Return</b>
+          <div class="cmd"><code id="cmd">curl -fsSL https://raw.githubusercontent.com/charliecurrin/stash/main/install.sh | bash</code><button id="copy" type="button">Copy</button></div>
+          <p style="margin-top:8px">It downloads about 110 MB and takes a minute or so.</p></div></li>
+        <li><div><b>Sign in</b><p>Stash opens by itself. Enter your email, type the 6-digit code we send you, and pick your @username.</p></div></li>
+      </ol>
+      <div class="small">After that, Stash updates itself. You'll see a <b>Restart &amp; Update</b> button when there's something new.</div>
+    </div>
+  </section>
+
+  <section id="features">
+    <h2>What's inside</h2>
+    <div class="grid">
+      <div class="card"><div class="ic">📝</div><b>Notes that do more</b><p>Headings, checklists, tables, code and images, plus stickies, shapes and drawings you can put anywhere.</p></div>
+      <div class="card"><div class="ic">👥</div><b>Live collaboration</b><p>Shared sections with folders. See each other's cursors and edits in real time, with full version history.</p></div>
+      <div class="card"><div class="ic">🗂️</div><b>Smart Sort</b><p>Drop in any file. Stash reads it, files it in the right folder, and learns from you.</p></div>
+      <div class="card"><div class="ic">✨</div><b>Ask Stash</b><p>Press <kbd>⌘</kbd><kbd>⌥</kbd> from anywhere to ask, save what's on your screen, or make a note by voice.</p></div>
+      <div class="card"><div class="ic">⚡</div><b>Menu-bar quick panel</b><p>Quick notes, drag-and-drop and recent items, right from the top of your screen.</p></div>
+      <div class="card"><div class="ic">📄</div><b>Export anything</b><p>Turn a note into a PDF or plain text in one click.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Questions</h2>
+    <div class="faq">
+      <details><summary>Is it free?</summary><p>Yes. Stash is free to download and use.</p></details>
+      <details><summary>Why Terminal instead of a normal download?</summary><p>Stash isn't on the App Store yet. The one-line installer is the quickest way to install it without macOS blocking it as an "unidentified developer". A regular download button is coming.</p></details>
+      <details><summary>Which Macs does it work on?</summary><p>Any Mac running a recent version of macOS, with Apple Silicon (M1 and later) or Intel.</p></details>
+      <details><summary>Where is my stuff kept?</summary><p>Your private notes and files are stored on your Mac. Only what you put in a shared section is synced, so the people in it can see it.</p></details>
+      <details><summary>How do I uninstall it?</summary><p>Quit Stash from the menu-bar icon, then drag Stash from your Applications folder to the Trash.</p></details>
+    </div>
+  </section>
+
+  <footer>Made by Charlie Currin · <a href="https://github.com/charliecurrin/stash">Source on GitHub</a></footer>
+</div>
+<script>
+const b = document.getElementById('copy'), c = document.getElementById('cmd').textContent;
+b.onclick = async () => {
+  try { await navigator.clipboard.writeText(c); }
+  catch (e) { const r = document.createRange(); r.selectNodeContents(document.getElementById('cmd')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); document.execCommand('copy'); }
+  b.textContent = 'Copied ✓'; b.classList.add('ok'); setTimeout(() => { b.textContent = 'Copy'; b.classList.remove('ok'); }, 1800);
+};
+</script>
+</body>
+</html>
