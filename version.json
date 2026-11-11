@@ -1,6 +1,6 @@
 {
-  "version": "1.8.1",
-  "notes": "New accounts start with a clean, empty Stash",
+  "version": "1.8.2",
+  "notes": "Sign in with a 6-digit email code",
   "files": [
     "index.html",
     "collab.js",

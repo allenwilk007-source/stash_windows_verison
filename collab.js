@@ -47,7 +47,7 @@ const Collab = (() => {
     setTimeout(() => e.focus(), 50);
   }
   function codeScreen(email){
-    gateHTML(`<h2>Check your email</h2><div class="sub">We sent a sign-in email to <b style="color:#fff">${esc(email)}</b>. Click the link in it — or type the code if it has one.</div>
+    gateHTML(`<h2>Check your email</h2><div class="sub">We sent a 6-digit code to <b style="color:#fff">${esc(email)}</b>. Enter it below (check spam if it's not there in a minute).</div>
       <div class="fld"><div class="in"><input id="cC" inputmode="numeric" maxlength="8" placeholder="123456" autocomplete="one-time-code" style="letter-spacing:.3em;font-size:18px;text-align:center"></div><span class="err" id="cCe"></span></div>
       <button class="go" id="cGo">Sign in</button><div class="lnk" id="cBack">Use a different email</div>`);
     const c = $('#cC'), go = $('#cGo');
