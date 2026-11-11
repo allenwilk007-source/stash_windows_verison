@@ -6,7 +6,7 @@
 //   One-time setup downloads the Ollama engine (~230 MB) and the model (~7–19 GB,
 //   picked to fit how much memory the Mac has).
 // OPTIONAL: connect an Anthropic key to use Claude instead (smartest, pay-per-use).
-const { app, net, desktopCapturer, screen, systemPreferences, safeStorage, shell } = require('electron');
+const { app, net, desktopCapturer, screen, systemPreferences, safeStorage, shell, clipboard } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -158,6 +158,8 @@ const NO_SCREEN_MSG = "I can't see your screen yet — Stash needs Screen Record
 
 /* =====================  tools (shared by both brains)  ===================== */
 const TOOL_DEFS = [
+  { name: 'copy_to_clipboard', description: "Copy text to the user's clipboard so they can paste it anywhere (⌘V). Use when they say 'copy', 'copy that', 'copy the text on my screen', 'give me something I can paste'. Put exactly the text they want in it (e.g. transcribe it faithfully from the screen).", params: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } },
+  { name: 'read_clipboard', description: "Read what the user currently has copied. Use when they say 'what I copied', 'my clipboard', 'this I just copied', 'paste'.", params: { type: 'object', properties: {} } },
   { name: 'look_at_screen', description: "Look at what is on the user's screen right now. Use it whenever they say 'this', 'on my screen', 'what am I looking at', 'what does this mean', or ask you to save/copy what's on screen.", params: { type: 'object', properties: {} } },
   { name: 'save_note', description: "Save a note into the user's Stash library. Use for 'make a note', 'write this down', 'save this', 'put this in a note'. When saving what's on the screen, put the actual text from the screen into the body (transcribe it faithfully, keep links and numbers), and give it a short descriptive title. Only set folder if the user named one or an existing folder clearly fits; otherwise leave it out and Stash's Smart Sort will file it in the best folder automatically. Set include_screenshot true when the note is about something on screen.", params: { type: 'object', properties: { title: { type: 'string', description: 'Short descriptive title, e.g. "Hiring principles — Jake Paul post"' }, body: { type: 'string', description: 'The note text' }, folder: { type: 'string', description: 'Optional. Name of an existing folder, or a new one if the user asked for it.' }, include_screenshot: { type: 'boolean' } }, required: ['title', 'body'] } },
   { name: 'create_folder', description: 'Create a new folder in Stash.', params: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } },
@@ -171,6 +173,8 @@ async function runTool(name, input, { exec, status }, sources, setOpen){
     const r = await exec(`window.Stash.saveNote(${JSON.stringify(arg)})`);
     (r.sources || []).forEach(s => sources.push(s)); return r.text;
   }
+  if (name === 'copy_to_clipboard'){ clipboard.writeText(String(input.text || '')); status('Copied'); return `Copied ${String(input.text || '').length} characters to the clipboard.`; }
+  if (name === 'read_clipboard'){ const t = clipboard.readText(); return t ? 'Clipboard contents:\n' + t.slice(0, 8000) : 'The clipboard is empty (or holds an image/file, not text).'; }
   if (name === 'create_folder') return (await exec(`window.Stash.createFolder(${JSON.stringify(input.name)})`)).text;
   if (name === 'search_stash'){
     status('Searching your Stash…');
@@ -189,7 +193,7 @@ You can save and organise things in his Stash library with your tools. When he a
 Today is ${new Date().toDateString()}.
 STASH LIBRARY (for context): ${lib || '(empty)'}`;
 
-let history = [], localHistory = [];
+let history = [], localHistory = [], webOK = true;
 const reset = () => { history = []; localHistory = []; };
 
 /* ---------- Claude brain ---------- */
@@ -202,21 +206,41 @@ async function callClaude(body){
 function slim(h){
   for (let i = 0; i < h.length - 2; i++){
     const m = h[i];
+    if (m.role === 'user' && Array.isArray(m.content) && m.content.some(b => b.type === 'image')) m.content = m.content.map(b => b.type === 'image' ? { type: 'text', text: '[screenshot shown earlier]' } : b);
     if (Array.isArray(m.content)) m.content.forEach(b => { if (b.type === 'tool_result' && Array.isArray(b.content)) b.content = b.content.map(c => c.type === 'image' ? { type: 'text', text: '[screenshot shown earlier]' } : c); });
     if (m.images) delete m.images;
   }
 }
 async function askClaude(q, ctx){
-  const system = systemPrompt(ctx.lib) + '\nYou can see his screen with look_at_screen — use it whenever he refers to something on screen.';
+  const system = systemPrompt(ctx.lib) + `
+You can see his screen with look_at_screen — use it whenever he refers to something on screen, or whenever the question only makes sense with what he's looking at ("this", "here", "it", "what should I reply"). When a screenshot is attached, read it carefully: transcribe text exactly, read numbers, code, errors, charts and UI precisely.
+You can copy text to his clipboard (copy_to_clipboard) and read what he copied (read_clipboard). When he asks you to copy something, put it on the clipboard and say "Copied — ⌘V to paste."
+You can search the web for anything current (news, prices, scores, people, docs) — do it rather than guessing.
+Answer any question at all, the way Claude would. Be accurate; if unsure, say so.`;
   const tools = TOOL_DEFS.map(t => ({ name: t.name, description: t.description, input_schema: t.params }));
-  history.push({ role: 'user', content: q }); slim(history);
+  if (webOK) tools.push({ type: 'web_search_20250305', name: 'web_search', max_uses: 4 });
+  // if the question is clearly about the screen, attach the screenshot right away (one round trip faster)
+  let content = q;
+  if (SCREEN_RE.test(q) || (history.length === 0 && /\b(this|here|it)\b/i.test(q) && q.length < 80)){
+    const shot = lastShot || await captureScreen();
+    if (shot){ lastShot = shot; ctx.status('Looking at your screen…'); content = [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: shot } }, { type: 'text', text: q + "\n\n(Attached: a screenshot of my screen right now.)" }]; }
+  }
+  history.push({ role: 'user', content }); slim(history);
   const sources = []; let open = null;
   for (let step = 0; step < 8; step++){
     ctx.status(step ? 'Working on it…' : 'Thinking…');
-    const res = await callClaude({ model: cfg.model || FALLBACK_MODEL, max_tokens: 1500, system, tools, messages: history });
+    let res;
+    try { res = await callClaude({ model: cfg.model || FALLBACK_MODEL, max_tokens: 2500, system, tools, messages: history }); }
+    catch (e) {
+      // web search not enabled on this account → turn it off and try again
+      if (webOK && /web_search|server tool|not (enabled|supported)/i.test(e.message)){ webOK = false; tools.pop(); res = await callClaude({ model: cfg.model || FALLBACK_MODEL, max_tokens: 2500, system, tools, messages: history }); }
+      else throw e;
+    }
     history.push({ role: 'assistant', content: res.content });
     const uses = res.content.filter(b => b.type === 'tool_use');
-    if (res.stop_reason !== 'tool_use' || !uses.length) return { text: res.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim(), sources, open, ai: 'claude' };
+    if (res.content.some(b => b.type === 'server_tool_use')) ctx.status('Searching the web…');
+    if (res.stop_reason === 'pause_turn') continue;
+    if (res.stop_reason !== 'tool_use' || !uses.length) return { text: res.content.filter(b => b.type === 'text').map(b => b.text).join('').trim(), sources, open, ai: 'claude' };
     const results = [];
     for (const u of uses){
       let content;

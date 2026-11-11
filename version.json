@@ -1,6 +1,6 @@
 {
-  "version": "1.5.2",
-  "notes": "Re-add videos that older versions didn’t keep",
+  "version": "1.6.0",
+  "notes": "Smarter AI: sees your screen, copies to clipboard, searches the web",
   "files": [
     "index.html",
     "quick.html",
