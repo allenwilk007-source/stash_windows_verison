@@ -1,6 +1,6 @@
 {
-  "version": "1.6.0",
-  "notes": "Smarter AI: sees your screen, copies to clipboard, searches the web",
+  "version": "1.7.0",
+  "notes": "Accounts: sign in with your @username and display name",
   "files": [
     "index.html",
     "quick.html",

@@ -187,13 +187,13 @@ async function runTool(name, input, { exec, status }, sources, setOpen){
   }
   return 'Unknown tool';
 }
-const systemPrompt = lib => `You are Stash — Charlie's personal AI assistant on his Mac. You're a general assistant, not limited to his library: answer any question, explain things, write, plan, brainstorm, do maths, help with whatever is on his screen.
+const systemPrompt = lib => `You are Stash — ${ME ? ME.name + ' (@' + ME.username + ')' : 'the user'}'s personal AI assistant on their Mac. You're a general assistant, not limited to their library: answer any question, explain things, write, plan, brainstorm, do maths, help with whatever is on their screen.
 You appear as a small bar at the top of the screen, so be brief by default (1–4 short sentences, or a few bullets). Plain text, at most light **bold**; no headings or tables.
-You can save and organise things in his Stash library with your tools. When he asks you to note/save something, call save_note (don't just reply with the text). Afterwards confirm in one short line what you saved and which folder it went in. Only use a tool when it's actually needed.
+You can save and organise things in their Stash library with your tools. When they ask you to note/save something, call save_note (don't just reply with the text). Afterwards confirm in one short line what you saved and which folder it went in. Only use a tool when it's actually needed.
 Today is ${new Date().toDateString()}.
 STASH LIBRARY (for context): ${lib || '(empty)'}`;
 
-let history = [], localHistory = [], webOK = true;
+let history = [], localHistory = [], webOK = true, ME = null;
 const reset = () => { history = []; localHistory = []; };
 
 /* ---------- Claude brain ---------- */
@@ -213,8 +213,8 @@ function slim(h){
 }
 async function askClaude(q, ctx){
   const system = systemPrompt(ctx.lib) + `
-You can see his screen with look_at_screen — use it whenever he refers to something on screen, or whenever the question only makes sense with what he's looking at ("this", "here", "it", "what should I reply"). When a screenshot is attached, read it carefully: transcribe text exactly, read numbers, code, errors, charts and UI precisely.
-You can copy text to his clipboard (copy_to_clipboard) and read what he copied (read_clipboard). When he asks you to copy something, put it on the clipboard and say "Copied — ⌘V to paste."
+You can see their screen with look_at_screen — use it whenever they refer to something on screen, or whenever the question only makes sense with what they're looking at ("this", "here", "it", "what should I reply"). When a screenshot is attached, read it carefully: transcribe text exactly, read numbers, code, errors, charts and UI precisely.
+You can copy text to their clipboard (copy_to_clipboard) and read what they copied (read_clipboard). When they ask you to copy something, put it on the clipboard and say "Copied — ⌘V to paste."
 You can search the web for anything current (news, prices, scores, people, docs) — do it rather than guessing.
 Answer any question at all, the way Claude would. Be accurate; if unsure, say so.`;
   const tools = TOOL_DEFS.map(t => ({ name: t.name, description: t.description, input_schema: t.params }));
@@ -312,6 +312,7 @@ async function askLocal(q, ctx){
 /** ask(q, {exec, status}) → {text, sources, open, ai} or null if no AI is set up */
 async function ask(q, { exec, status }){
   const lib = await exec('window.Stash && window.Stash.summary ? window.Stash.summary() : ""').catch(() => '');
+  ME = await exec('window.Stash && window.Stash.me ? window.Stash.me() : null').catch(() => null);
   const ctx = { exec, status, lib };
   // Stash runs on Claude (the free on-device engine is switched off)
   if (cfg.key) return askClaude(q, ctx);
