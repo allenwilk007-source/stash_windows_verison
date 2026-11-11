@@ -676,27 +676,10 @@ let folders = [
   {id:'docs', name:'Documents', icon:'doc'},
   {id:'images', name:'Images', icon:'image'},
   {id:'videos', name:'Videos', icon:'video'},
-  {id:'f-launch', name:'Launch Project', icon:'folder'},
 ];
 const now = Date.now(), day = 864e5;
-let items = [
-  {type:'note', title:'Weekly Plan', body:'Mon — finish deck outline\nTue — record b-roll\nWed — edit + captions\nThu — review with team\nFri — publish', t:now-day*.2, star:true},
-  {type:'note', title:'Ideas', body:'Voice memos → to-dos app\nMini-series on planning a week\nRe-cut interview into 3 shorts', t:now-day*3},
-  {type:'note', title:'Reading List', body:'The Creative Act\nShow Your Work\nBuilding a Second Brain', t:now-day*7},
-  {type:'doc', title:'Brand Guidelines', ext:'PDF', color:'#e5484d', t:now-day*2, size:4.1e6, sections:[['Voice','Confident, direct, a little playful.'],['Color','Dark canvas, white type, one accent.']]},
-  {type:'doc', title:'Contract Draft', ext:'DOCX', color:'#3b82f6', t:now-day*5, size:220e3, sections:[['Scope','Three short-form videos per month.'],['Payment','Net 15 from invoice date.']]},
-  {type:'doc', title:'Q4 Budget', ext:'XLSX', color:'#22a06b', t:now-day*8, size:96e3, sections:[['Summary','Production 40% · Ads 35% · Tools 15% · Buffer 10%']]},
-  {type:'image', title:'Dusk Moodboard', seed:11, pal:0, t:now-day, size:2.4e6, star:true},
-  {type:'image', title:'Desert Study', seed:37, pal:2, t:now-day*4, size:3.1e6},
-  {type:'image', title:'Lake Reference', seed:53, pal:4, t:now-day*6, size:1.8e6},
-  {type:'image', title:'Forest Ridge', seed:83, pal:5, t:now-day*11, size:2.2e6},
-  {type:'video', title:'City B-Roll', seed:23, pal:1, dur:'0:42', t:now-day*1.5, size:88e6},
-  {type:'video', title:'Sunset Timelapse', seed:71, pal:3, dur:'0:18', t:now-day*10, size:42e6},
-  {type:'video', title:'Interview Take 3', seed:41, pal:3, dur:'12:08', t:now-day*2.5, size:640e6, folder:'f-launch', star:true},
-  {type:'note', title:'Launch Checklist', body:'☐ Final copy\n☐ Thumbnails ×3\n☐ Schedule posts\n☐ Email list', t:now-day*12, folder:'f-launch'},
-  {type:'link', title:'Landing page inspiration', link:'https://www.awwwards.com/websites/', body:'Reference for the launch page — dark hero, big type, one accent colour.', t:now-day*1.2, folder:'f-launch'},
-  {type:'doc', title:'Pitch Deck', ext:'KEY', color:'#a855f7', t:now-day*13, size:18e6, folder:'f-launch', sections:[['Problem','Files live in five different apps.'],['Solution','One place for everything you keep.']]},
-].map(it => ({id: uid(), folder: HOME[it.type], ...it, src: it.seed ? scene(it.seed, PAL[it.pal]) : null}));
+// new accounts start empty — no sample notes, files or folders
+let items = [];
 
 let view = 'home', query = '', open = null;
 
@@ -1318,7 +1301,7 @@ const Agent = (() => {
       <span class="stat"><svg viewBox="0 0 24 24"><rect x="2.4" y="2.4" width="19.2" height="19.2" rx="6.2" fill="#fff"/><path d="M12 7.1v7.4M8.15 12.35L12 16.2l3.85-3.85" stroke="#111" stroke-width="1.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>${words.toLocaleString()} words indexed</span>
       <span class="stat"><svg viewBox="0 0 24 24" fill="none" stroke="#e8e8e8" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>${folders.length} folders connected</span>`;
   }
-  const PILLS = ["What's on my plan this week?", 'Summarize the contract draft', 'What ideas have I saved?', "What's in Launch Project?", 'How many images do I have?'];
+  const PILLS = ["What did I save this week?", 'Summarize my latest note', 'What ideas have I saved?', 'Find my documents', 'How many images do I have?'];
   $('#pills').innerHTML = PILLS.map((p, k) => `<button class="pill" style="animation-delay:${.55 + k * .1}s">${esc(p)}</button>`).join('');
   $('#pills').addEventListener('click', e => { const b = e.target.closest('.pill'); if (b) ask(b.textContent); });
   const grow = () => { const t = $('#agin'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight) + 'px'; };
@@ -1762,7 +1745,7 @@ const Home = (() => {
   let nodes = [], hub = {x: 0, y: 0};
   function build(){
     const nf = folders.length;
-    $('#hsub').textContent = `${items.length} things across ${nf} folders. Drop files anywhere — Stash reads them and files them for you.`;
+    $('#hsub').textContent = items.length ? `${items.length} thing${items.length === 1 ? '' : 's'} across ${nf} folders. Drop files anywhere — Stash reads them and files them for you.` : 'Your Stash is empty. Drop in files, images or videos — or start with a note.';
     const chip = it => it.type === 'image' || (it.type === 'video' && (it.src || it.poster)) ? `<i style="background-image:url('${it.thumb || it.poster || it.src}')"></i>`
       : `<i style="background:${it.type === 'note' ? '#f4f1ea' : it.type === 'doc' ? (it.color || '#555') : it.type === 'link' ? `hsl(${hueOf(domainOf(it.link))} 55% 42%)` : '#333'}"></i>`;
     $('#nodes').innerHTML = folders.map(f => {

@@ -1,6 +1,6 @@
 {
-  "version": "1.8.0",
-  "notes": "Collaboration: share folders and notes by @username, live cursors, version history",
+  "version": "1.8.1",
+  "notes": "New accounts start with a clean, empty Stash",
   "files": [
     "index.html",
     "collab.js",
