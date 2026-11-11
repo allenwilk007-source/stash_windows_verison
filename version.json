@@ -1,6 +1,6 @@
 {
-  "version": "1.9.0",
-  "notes": "New notes: a page + free canvas \u2014 shapes, stickies, images, drawing, tables, live collaboration",
+  "version": "1.9.1",
+  "notes": "Notes now open right on the Stash background \u2014 no pop-up panel",
   "files": [
     "index.html",
     "notes.js",

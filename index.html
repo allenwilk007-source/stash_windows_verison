@@ -102,6 +102,9 @@ input,textarea{font:inherit;color:inherit}
 /* preview panel (slides over the grid) */
 .pv{position:absolute;inset:0;display:flex;flex-direction:column;background:rgba(20,20,24,.72);backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(20px);transform:translateX(100%);transition:transform .45s var(--ease)}
 .pv.show{transform:none}
+.pv.padview{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;transform:none;opacity:0;pointer-events:none;transition:opacity .35s var(--ease)}
+.pv.padview.show{opacity:1;pointer-events:auto}
+.pv.padview .pvbar{border-bottom-color:transparent}
 .main .head,.main .grid{transition:opacity .3s}
 .main.viewing .head,.main.viewing .grid,.main.viewing .home{opacity:0;pointer-events:none}
 .pv{z-index:10}
@@ -784,6 +787,7 @@ function openItem(it){
   if (window.Pad?.current) Pad.current.destroy();
   $('#pvbody').innerHTML = b;
   $('#pvbody').classList.toggle('padmode', it.type === 'note' && !!window.Pad);
+  clearTimeout(window.__pvT); $('#pv').classList.toggle('padview', it.type === 'note' && !!window.Pad);
   $('#pv').classList.add('show'); $('#main').classList.add('viewing');
   if (it.type === 'note' && window.Pad){
     if (!app.classList.contains('big')){ app.classList.add('big'); app.dataset.autoBig = '1'; }
@@ -843,6 +847,7 @@ function closeItem(){
   Collab.detach();
   if (window.Pad?.current){ Pad.current.destroy(); }
   $('#pvbody').classList.remove('padmode');
+  window.__pvT = setTimeout(() => { if (!open) $('#pv').classList.remove('padview'); }, 400);
   if (app.dataset.autoBig){ app.classList.remove('big'); delete app.dataset.autoBig; }
   if (open && open.type === 'note' && !open.title && (window.Pad && open.doc ? Pad.isEmpty(open) : !open.body)) items = items.filter(x => x !== open);
   if (open && open.type === 'note' && open.doc && window.Pad) open.body = Pad.toText(open.doc);

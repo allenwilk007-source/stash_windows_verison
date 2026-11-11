@@ -191,7 +191,7 @@ const CSS = `
 .pvbody.padmode{overflow:hidden}
 .pad{position:absolute;inset:0;display:flex;flex-direction:column;--acc:#4f86e8;--pt:#ececee;--pm:rgba(255,255,255,.52);--pl:rgba(255,255,255,.09);outline:0;user-select:none;-webkit-user-select:none}
 .pad button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
-.ptop{display:flex;align-items:center;gap:2px;padding:6px 10px;border-bottom:1px solid var(--line,rgba(255,255,255,.08));overflow-x:auto;scrollbar-width:none;flex:none;background:rgba(0,0,0,.08)}
+.ptop{display:flex;align-items:center;gap:2px;padding:6px 10px;border-bottom:1px solid rgba(255,255,255,.06);overflow-x:auto;scrollbar-width:none;flex:none;background:none}
 .ptop::-webkit-scrollbar{display:none}
 .ptop button,.pdock button,.pobar button,.pzc button,.pbub button{height:28px;min-width:28px;padding:0 6px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;gap:4px;color:rgba(255,255,255,.78);font-size:12.5px;flex:none;transition:background .12s,color .12s}
 .ptop button:hover,.pdock button:hover,.pobar button:hover,.pzc button:hover,.pbub button:hover{background:rgba(255,255,255,.08);color:#fff}
@@ -203,14 +203,14 @@ const CSS = `
 .pmetaslot{font-size:11.5px;color:var(--pm);white-space:nowrap;display:flex;gap:10px;align-items:center;flex:none}
 .pmetaslot .cmeta{position:static;margin:0;padding:0}
 .pcol{width:15px;height:3px;border-radius:2px;display:block;margin-top:1px}
-.pscroll{flex:1;overflow:auto;position:relative;background:radial-gradient(rgba(255,255,255,.07) 1px,transparent 1.3px) 0 0/22px 22px;user-select:text;-webkit-user-select:text}
+.pscroll{flex:1;overflow:auto;position:relative;background:none;user-select:text;-webkit-user-select:text}
 .pscroll.pan,.pscroll.pan *{cursor:grab!important}.pscroll.panning,.pscroll.panning *{cursor:grabbing!important}
 .pstage{position:relative}
 .pzoom{position:absolute;left:0;top:0;transform-origin:0 0}
-.ppage{position:absolute;background:rgba(24,24,28,.92);border:1px solid rgba(255,255,255,.07);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.35);padding:0 0 80px;min-height:900px;color:var(--pt);font-size:15.5px;line-height:1.7;cursor:text}
+.ppage{position:absolute;background:none;border:0;border-radius:0;box-shadow:none;padding:0 0 80px;min-height:600px;text-shadow:0 1px 12px rgba(0,0,0,.25);color:var(--pt);font-size:15.5px;line-height:1.7;cursor:text}
 .ppage.serif{font-family:"Iowan Old Style","Charter",Georgia,serif;font-size:17px}
 .ppage.mono{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:14px}
-.pcover{height:0;border-radius:13px 13px 0 0;background-size:cover;background-position:center;position:relative}
+.pcover{height:0;border-radius:16px;background-size:cover;background-position:center;position:relative}
 .pcover.has{height:190px}
 .pcover .pcbtns{position:absolute;right:14px;bottom:12px;display:none;gap:6px}
 .pcover:hover .pcbtns{display:flex}
