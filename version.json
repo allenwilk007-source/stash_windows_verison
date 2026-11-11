@@ -1,6 +1,6 @@
 {
-  "version": "1.9.1",
-  "notes": "Notes now open right on the Stash background \u2014 no pop-up panel",
+  "version": "1.9.2",
+  "notes": "Drag pictures anywhere in a note \u2014 text wraps around them. Double-click any empty spot to add text.",
   "files": [
     "index.html",
     "notes.js",

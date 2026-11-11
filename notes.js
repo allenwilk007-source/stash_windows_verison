@@ -266,6 +266,20 @@ const CSS = `
 .pb.drop-before:after{top:-2px}.pb.drop-after:after{bottom:-2px}
 .pb.dragging{opacity:.35}
 .pfig{margin:10px auto;position:relative;max-width:100%}
+.pb[data-fl=left]{float:left;margin:4px 28px 10px 0;z-index:2}
+.pb[data-fl=right]{float:right;margin:4px 0 10px 28px;z-index:2}
+.pb[data-fl=left] .pfig,.pb[data-fl=right] .pfig{margin:0;width:100%!important}
+.pb[data-fl=left]>.pbh,.pb[data-fl=right]>.pbh{display:none}
+.pb[data-t=ul],.pb[data-t=ol],.pb[data-t=todo],.pb[data-t=quote],.pb[data-t=code],.pb[data-t=table],.pb[data-t=hr]{display:flow-root}
+.pb[data-t=img]:not([data-fl=left]):not([data-fl=right]){clear:both}
+.pblocks:after{content:"";display:block;clear:both}
+.pfig img{cursor:grab}
+.pfig.lift{opacity:.25}
+.pdi{position:absolute;background:var(--acc);border-radius:3px;pointer-events:none;z-index:5;box-shadow:0 0 0 3px rgba(79,134,232,.25)}
+.pghost{position:absolute;z-index:70;pointer-events:none;opacity:.85;border-radius:10px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.5);transform:rotate(-1.5deg)}
+.pghost img{display:block;width:100%}
+.pghost.free{opacity:.6;transform:none;outline:2px dashed var(--acc)}
+.phint{position:absolute;z-index:71;pointer-events:none;background:var(--acc);color:#fff;font-size:11.5px;font-weight:600;padding:3px 8px;border-radius:6px;white-space:nowrap}
 .pb[data-al=left] .pfig{margin-left:0}.pb[data-al=right] .pfig{margin-right:0}
 .pfig img,.pfig video{display:block;width:100%;border-radius:10px}
 .pfig.sel img{outline:2px solid var(--acc);outline-offset:2px}
@@ -442,7 +456,7 @@ function mount(host, it, opts = {}){
   </div></div></div>
   <div class="pdock">
     <button data-tool="select" title="Select (V)">${ic('cursor', 18)}</button><button data-tool="hand" title="Hand (H) — or hold Space">${ic('hand', 18)}</button><i class="psep"></i>
-    <button data-tool="text" title="Text box (T)">${ic('text', 18)}</button><button data-tool="sticky" title="Sticky note (S)">${ic('sticky', 18)}</button>
+    <button data-tool="text" title="Text box (T) — or double-click any empty spot">${ic('text', 18)}</button><button data-tool="sticky" title="Sticky note (S)">${ic('sticky', 18)}</button>
     <button data-tool="shape" title="Shape (R)">${ic('rect', 18)}</button><button class="pcaret" data-a="shapes" title="Pick a shape"></button>
     <button data-tool="pen" title="Pen (P) · Highlighter (M) · Eraser (E)">${ic('pen', 18)}</button><button class="pcaret" data-a="pens" title="Pen, highlighter, eraser"></button><i class="psep"></i>
     <button data-a="addimg" title="Add image or video">${ic('image', 18)}</button><button data-a="addtable" title="Add table">${ic('table', 18)}</button>
@@ -622,13 +636,14 @@ function mount(host, it, opts = {}){
   function fillBlock(el, b){
     el.dataset.t = b.t; el.dataset.ind = b.ind || 0; el.style.setProperty('--ind', b.ind || 0); el.dataset.al = b.al || '';
     el.classList.toggle('done', b.t === 'todo' && !!b.c); el.classList.toggle('sel', selBlock === b.id);
+    const fl = b.t === 'img' && (b.fl === 'left' || b.fl === 'right') ? b.fl : ''; el.dataset.fl = fl; el.style.width = fl ? (b.w || 45) + '%' : '';
     let h = `<div class="pbh" contenteditable="false"><button class="pplus" title="Click to add a block below">${ic('plus', 14)}</button><button class="pgrip" title="Drag to move · Click for options">${ic('grip', 14)}</button></div>`;
     if (TEXTY.has(b.t)){
       if (b.t === 'todo') h += '<span class="pchk" role="checkbox"></span>';
       if (b.t === 'callout') h += `<span class="pemo" title="Change emoji">${esc(b.e || '💡')}</span>`;
       h += `<div class="pbc" contenteditable="true" spellcheck="${b.t !== 'code'}" data-ph="${esc(PH[b.t] || '')}">${clean(b.h)}</div>`;
     } else if (b.t === 'hr') h += '<hr>';
-    else if (b.t === 'img') h += `<figure class="pfig${selBlock === b.id ? ' sel' : ''}" style="width:${b.w || 100}%">${b.vid ? '<video controls playsinline preload="metadata"></video>' : '<img draggable="false" alt="">'}<span class="prs l"></span><span class="prs r"></span><figcaption contenteditable="true" data-ph="Write a caption…">${esc(b.cap || '')}</figcaption></figure>`;
+    else if (b.t === 'img') h += `<figure class="pfig${selBlock === b.id ? ' sel' : ''}" style="width:${b.fl ? 100 : b.w || 100}%">${b.vid ? '<video controls playsinline preload="metadata"></video>' : '<img draggable="false" alt="">'}<span class="prs l"></span><span class="prs r"></span><figcaption contenteditable="true" data-ph="Write a caption…">${esc(b.cap || '')}</figcaption></figure>`;
     else if (b.t === 'table') h += `<div class="ptw"><table>${(b.rows || [['']]).map((r, ri) => `<tr>${r.map((c, ci) => `<td contenteditable="true" data-r="${ri}" data-c="${ci}">${clean(c)}</td>`).join('')}</tr>`).join('')}</table><button class="padc" title="Add column">${ic('plus', 12)}</button><button class="padr" title="Add row">${ic('plus', 12)}</button></div>`;
     el.innerHTML = h;
     if (b.t === 'img') setMedia(el.querySelector('img,video'), b);
@@ -679,7 +694,7 @@ function mount(host, it, opts = {}){
 
   /* ---------- layout + zoom ---------- */
   let rl = 0;
-  function relayout(){ if (rl) return; rl = requestAnimationFrame(() => { rl = 0; layout(true); drawSel(); drawPeers(); }); }
+  function relayout(){ if (rl) return; rl = requestAnimationFrame(() => { rl = 0; layout(true); drawSel(); drawPeers(); if (selBlock) showImgBar(); }); }
   function aabb(o){
     if (o.k === 'line' || o.k === 'arrow') return { x: Math.min(o.x1, o.x2), y: Math.min(o.y1, o.y2), w: Math.abs(o.x2 - o.x1), h: Math.abs(o.y2 - o.y1) };
     if (!o.r) return { x: o.x, y: o.y, w: o.w, h: o.h };
@@ -950,7 +965,7 @@ function mount(host, it, opts = {}){
   /* ---------- pointer: select / move / resize / rotate / marquee ---------- */
   scroll.addEventListener('pointerdown', onDown);
   catchEl.addEventListener('pointerdown', onCreateDown);
-  let lastDown = {};
+  let lastDown = {}, lastEmpty = null;
   function onDown(e){
     if (e.target === catchEl || catchEl.contains(e.target)) return;
     if (e.button === 1 || tool === 'hand' || spaceDown){ startPan(e); return; }
@@ -981,8 +996,13 @@ function mount(host, it, opts = {}){
     }
     if (t.closest('.psel')) return;
     if (t.closest('.ppage')){ if (sel.size) clearSel(); return; }
-    // empty canvas → box-select
+    // empty canvas → box-select; double-click → type right there
     e.preventDefault(); if (typing()) document.activeElement.blur(); hideBubble(); selBlockSet(null);
+    const now = Date.now(), pt = W(e);
+    if (lastEmpty && now - lastEmpty.t < 420 && Math.hypot(pt.x - lastEmpty.x, pt.y - lastEmpty.y) * z < 8){
+      lastEmpty = null; const o = addObj({ k: 'text', x: pt.x - 4, y: pt.y - 14, w: 260, h: 36, html: '', color: '#f4f4f5', fs: 18 }); commit(); select([o.id]); editText(o.id); return;
+    }
+    lastEmpty = { t: now, x: pt.x, y: pt.y };
     startMarquee(e);
   }
   function track(e, move, up){
@@ -1351,9 +1371,10 @@ function mount(host, it, opts = {}){
     if (t.closest('a') && (e.metaKey || e.ctrlKey || !t.closest('[contenteditable=true]'))){ e.preventDefault(); window.open(t.closest('a').href, '_blank'); return; }
     if (b.t === 'hr' || (b.t === 'img' && t.closest('img,video') && !t.closest('figcaption'))){ selBlockSet(b.id); if (typing()) document.activeElement.blur(); root.focus({ preventScroll: true }); }
   });
-  function selBlockSet(id){ if (selBlock === id) return; const old = selBlock; selBlock = id; [old, id].forEach(x => { const el = x && bEl(x); if (el){ el.classList.toggle('sel', x === id); el.querySelector('.pfig')?.classList.toggle('sel', x === id); } }); }
+  function selBlockSet(id){ if (selBlock === id){ showImgBar(); return; } const old = selBlock; selBlock = id; [old, id].forEach(x => { const el = x && bEl(x); if (el){ el.classList.toggle('sel', x === id); el.querySelector('.pfig')?.classList.toggle('sel', x === id); } }); showImgBar(); }
   blocksEl.addEventListener('pointerdown', e => {
-    const g = e.target.closest('.pgrip'), rs = e.target.closest('.prs');
+    const g = e.target.closest('.pgrip'), rs = e.target.closest('.prs'), fig = e.target.closest('.pfig');
+    if (fig && !rs && !e.target.closest('figcaption') && e.button === 0 && e.target.tagName === 'IMG'){ e.preventDefault(); startImgDrag(e, fig.closest('.pb')); return; }
     if (g){ e.preventDefault(); startBlockDrag(e, g.closest('.pb')); }
     else if (rs){ e.preventDefault(); e.stopPropagation(); startFigResize(e, rs); }
   });
@@ -1378,7 +1399,12 @@ function mount(host, it, opts = {}){
   function startFigResize(e, h){
     const pb = h.closest('.pb'), b = B(pb.dataset.id), fig = pb.querySelector('.pfig'), inner = blocksEl.getBoundingClientRect().width / 1;
     const fr = fig.getBoundingClientRect(), cx = fr.left + fr.width / 2, left = h.classList.contains('l');
-    track(e, ev => { const d = Math.abs(ev.clientX - cx) * 2; const w = clamp(Math.round(d / inner * 100), 15, 100); fig.style.width = w + '%'; b.w = w; relayout(); },
+    const pr = pb.getBoundingClientRect();
+    track(e, ev => {
+      let d = Math.abs(ev.clientX - cx) * 2;
+      if (b.fl === 'left') d = ev.clientX - pr.left; else if (b.fl === 'right') d = pr.right - ev.clientX;
+      const w = clamp(Math.round(d / inner * 100), 15, b.fl ? 75 : 100); b.w = w;
+      if (b.fl) pb.style.width = w + '%'; else fig.style.width = w + '%'; relayout(); showImgBar(); },
       () => { local({ t: 'b', b: clone(b) }); commit(); void left; });
   }
   function blockMenu(el){
@@ -1400,9 +1426,12 @@ function mount(host, it, opts = {}){
       commit(); return true;
     });
   }
-  function blockToObj(b){
+  function blockToObj(b, at){
     const el = bEl(b.id), m = el?.querySelector('img,video'), r = m?.getBoundingClientRect(), zr = zoomEl.getBoundingClientRect();
-    const w = r ? r.width / z : 400, h = r ? r.height / z : 260, x = r ? (r.left - zr.left) / z - ox : 40, y = r ? (r.top - zr.top) / z - oy : 40;
+    const w = r ? r.width / z : 400, h = r ? r.height / z : 260;
+    let x = r ? (r.left - zr.left) / z - ox : 40, y = r ? (r.top - zr.top) / z - oy : 40;
+    if (at){ x = at.x - w / 2; y = at.y - h / 2; }
+    selBlockSet(null);
     const o = addObj(b.vid ? { k: 'video', x, y, w, h, src: b.src, path: b.path, rad: 10 } : { k: 'image', x, y, w, h, ix: 0, iy: 0, iw: w, ih: h, src: b.src, path: b.path, rad: 10 });
     local({ t: 'bd', id: b.id }); commit(); select([o.id]);
   }
@@ -1411,6 +1440,74 @@ function mount(host, it, opts = {}){
     local({ t: 'b', b: { id: uid(), t: 'img', src: o.src, path: o.path, w: 100, cap: '' }, after: after ? after.id : undefined });
     local({ t: 'od', id: o.id }); commit(); sel = new Set(); drawSel(); flash('Moved into the page');
   }
+
+  /* ---------- drag pictures around the page; text wraps beside them ---------- */
+  function startImgDrag(e, pbEl){
+    const id = pbEl.dataset.id, fig = pbEl.querySelector('.pfig'), img = fig.querySelector('img');
+    const R = root.getBoundingClientRect(), fr = img.getBoundingClientRect(), offX = e.clientX - fr.left, offY = e.clientY - fr.top;
+    let moved = false, tgt = null, ghost = null, ind = null, hint = null, lastEv = e;
+    if (typing()) document.activeElement.blur();
+    track(e, ev => {
+      lastEv = ev;
+      if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 5) return;
+      if (!moved){
+        moved = true; fig.classList.add('lift'); hideImgBar();
+        ghost = document.createElement('div'); ghost.className = 'pghost'; ghost.innerHTML = `<img src="${esc(img.currentSrc || img.src)}">`;
+        const gw = Math.min(fr.width, 260); ghost.style.width = gw + 'px'; ghost._k = gw / fr.width; root.appendChild(ghost);
+        ind = document.createElement('div'); ind.className = 'pdi'; blocksEl.appendChild(ind);
+        hint = document.createElement('div'); hint.className = 'phint'; root.appendChild(hint);
+      }
+      ghost.style.left = ev.clientX - R.left - offX * ghost._k + 'px'; ghost.style.top = ev.clientY - R.top - offY * ghost._k + 'px';
+      hint.style.left = ev.clientX - R.left + 14 + 'px'; hint.style.top = ev.clientY - R.top + 16 + 'px';
+      const br = blocksEl.getBoundingClientRect(), pr = page.getBoundingClientRect();
+      if (ev.clientX < pr.left - 8 || ev.clientX > pr.right + 8 || ev.clientY > pr.bottom + 40){
+        tgt = { free: true }; ind.style.display = 'none'; ghost.classList.add('free'); hint.textContent = 'Drop to place it freely'; return;
+      }
+      ghost.classList.remove('free'); ind.style.display = '';
+      const els = [...blocksEl.children].filter(x => x.classList.contains('pb') && x !== pbEl);
+      let ref = null, before = true;
+      for (const x of els){ const r = x.getBoundingClientRect(); if (ev.clientY < r.top + r.height / 2){ ref = x; before = true; break; } }
+      if (!ref){ ref = els[els.length - 1]; before = false; }
+      const fx = (ev.clientX - br.left) / br.width, fl = fx < 0.34 ? 'left' : fx > 0.66 ? 'right' : '';
+      tgt = { ref: ref ? ref.dataset.id : null, before, fl };
+      const rr = ref ? ref.getBoundingClientRect() : br, y = ((before ? rr.top : rr.bottom) - br.top) / z, bw = br.width / z;
+      if (fl){ const h = Math.max(60, Math.min(160, (rr.height / z) * 1.2)); Object.assign(ind.style, { left: (fl === 'left' ? -10 : bw + 6) + 'px', top: y + 'px', width: '4px', height: h + 'px' }); hint.textContent = fl === 'left' ? 'Wrap text — picture on the left' : 'Wrap text — picture on the right'; }
+      else { Object.assign(ind.style, { left: '0px', top: y - 2 + 'px', width: bw + 'px', height: '4px' }); hint.textContent = 'Full width'; }
+    }, () => {
+      ind?.remove(); ghost?.remove(); hint?.remove(); fig.classList.remove('lift');
+      if (!moved){ selBlockSet(id); root.focus({ preventScroll: true }); return; }
+      const b = B(id); if (!b || !tgt) return;
+      if (tgt.free){ blockToObj(b, W(lastEv)); return; }
+      const nb = clone(b);
+      if (tgt.fl){ nb.fl = tgt.fl; if (!b.fl || !nb.w || nb.w > 70) nb.w = 45; } else { if (b.fl) nb.w = 100; delete nb.fl; }
+      local({ t: 'b', b: nb });
+      if (tgt.ref){ const ids = doc.blocks.map(x => x.id).filter(x => x !== id), at = ids.indexOf(tgt.ref) + (tgt.before ? 0 : 1); ids.splice(at, 0, id); local({ t: 'bo', ids }); }
+      commit(); selBlockSet(null); selBlockSet(id);
+    });
+  }
+  const ibar = document.createElement('div'); ibar.className = 'pobar pibar'; root.appendChild(ibar);
+  function hideImgBar(){ ibar.classList.remove('show'); }
+  function showImgBar(){
+    const b = selBlock && B(selBlock);
+    if (!b || b.t !== 'img'){ hideImgBar(); return; }
+    const fig = bEl(b.id)?.querySelector('.pfig'); if (!fig){ hideImgBar(); return; }
+    const cur = b.fl || 'inline';
+    ibar.innerHTML = [['inline', ic('alC', 15) + ' In line'], ['left', ic('alL', 15) + ' Wrap left'], ['right', ic('alR', 15) + ' Wrap right'], ['free', ic('cursor', 15) + ' Free-floating']]
+      .map(([k, l]) => `<button data-iw="${k}" class="${cur === k ? 'on' : ''}">${l}</button>`).join('') + `<i class="psep"></i><button data-iw="del" title="Delete">${ic('trash', 15)}</button>`;
+    ibar.classList.add('show');
+    const r = fig.getBoundingClientRect(), R = root.getBoundingClientRect(), top = q('.ptop').offsetHeight;
+    let y = r.top - R.top - ibar.offsetHeight - 10; if (y < top + 6) y = r.height > ibar.offsetHeight + 24 ? Math.max(top + 6, r.top - R.top) + 8 : r.bottom - R.top + 10;
+    ibar.style.left = clamp(r.left - R.left + r.width / 2 - ibar.offsetWidth / 2, 8, R.width - ibar.offsetWidth - 8) + 'px'; ibar.style.top = y + 'px';
+  }
+  ibar.addEventListener('pointerdown', e => e.preventDefault());
+  ibar.addEventListener('click', e => {
+    const k = e.target.closest('[data-iw]')?.dataset.iw, b = selBlock && B(selBlock); if (!k || !b) return;
+    if (k === 'del'){ const id = b.id; selBlockSet(null); local({ t: 'bd', id }); commit(); return; }
+    if (k === 'free'){ blockToObj(b); return; }
+    const nb = clone(b); if (k === 'inline'){ delete nb.fl; if (b.fl) nb.w = 100; } else { nb.fl = k; if (!b.fl) nb.w = 45; }
+    local({ t: 'b', b: nb }); commit(); showImgBar();
+  });
+  scroll.addEventListener('scroll', () => { if (selBlock) showImgBar(); });
 
   /* ---------- title ---------- */
   titleEl.addEventListener('input', () => { if (!titleEl.textContent) titleEl.innerHTML = ''; it.title = titleEl.textContent; opts.onTitle && opts.onTitle(it.title); send({ t: 'ti', v: it.title }); changed(true); });
