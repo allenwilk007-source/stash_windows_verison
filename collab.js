@@ -25,7 +25,11 @@ const Collab = (() => {
   const pushT = new Map();   // when we last saved a section's folder list (so our own echo doesn't undo newer edits)
   const COLORS = ['#4f86e8', '#8b5cf6', '#ec4899', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#64748b'];
   const initials = n => (String(n || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2) || '?');
-  const avatarOf = (p, size = 24, ring = false) => `<span class="cav" title="${esc((p.display_name || '') + ' @' + (p.username || ''))}" style="width:${size}px;height:${size}px;font-size:${Math.round(size * .42)}px;${p.photo ? `background-image:url('${p.photo}')` : `background:${p.color || COLORS[0]}`};${ring ? `box-shadow:0 0 0 2px ${p.color || COLORS[0]}` : ''}">${p.photo ? '' : esc(initials(p.display_name))}</span>`;
+  // other people's profile data is untrusted: only allow real image data and plain hex colours into styles
+  const safePhoto = v => typeof v === 'string' && /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v) ? v : null;
+  const safeColor = v => typeof v === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(v) ? v : COLORS[0];
+  const avatarOf = (p, size = 24, ring = false) => { const ph = safePhoto(p.photo), col = safeColor(p.color);
+    return `<span class="cav" title="${esc((p.display_name || '') + ' @' + (p.username || ''))}" style="width:${size}px;height:${size}px;font-size:${Math.round(size * .42)}px;${ph ? `background-image:url('${ph}')` : `background:${col}`};${ring ? `box-shadow:0 0 0 2px ${col}` : ''}">${ph ? '' : esc(initials(p.display_name))}</span>`; };
   const ago = t => { const s = (Date.now() - new Date(t)) / 1000; return s < 45 ? 'just now' : s < 3600 ? Math.round(s / 60) + 'm ago' : s < 86400 ? Math.round(s / 3600) + 'h ago' : new Date(t).toLocaleDateString(undefined, {month: 'short', day: 'numeric'}); };
   const nameOf = id => { for (const s of spaces.values()){ const m = s.members.find(m => m.id === id); if (m) return m; } return id === prof?.id ? prof : null; };
 
@@ -103,10 +107,10 @@ const Collab = (() => {
   }
   async function enterApp(isNew){
     // the online profile becomes Stash's account
-    Account.set({ name: prof.display_name, username: prof.username, color: prof.color, photo: prof.photo, created: Date.parse(prof.created_at), uid: prof.id });
+    Account.set({ name: prof.display_name, username: prof.username, color: prof.color, photo: prof.photo, bio: prof.bio || '', created: Date.parse(prof.created_at), uid: prof.id });
     Account._enter();
     if (isNew) toast(`Welcome to Stash, ${prof.display_name.split(' ')[0]}!`);
-    await loadAll(); subscribe(); ready = true; render();
+    await loadAll(); subscribe(); ready = true; render(); Notif.mount(); Notif.load();
   }
   async function boot(){
     if (!enabled) return false;
@@ -128,11 +132,11 @@ const Collab = (() => {
   async function signOut(){
     detach(); try { dbChan && sb.removeChannel(dbChan); } catch (e) {} dbChan = null;
     await sb.auth.signOut().catch(() => {});
-    dropShared(); user = prof = null; ready = false;
+    dropShared(); People.reset(); Notif.reset(); user = prof = null; ready = false;
     if (open) closeItem(); view = 'home'; render(); emailScreen();
   }
   async function updateProfile(p){
-    const { data, error } = await sb.from('profiles').update({ username: p.username, display_name: p.name, color: p.color, photo: p.photo }).eq('id', user.id).select().single();
+    const { data, error } = await sb.from('profiles').update({ username: p.username, display_name: p.name, color: p.color, photo: p.photo, bio: (p.bio || '').slice(0, 160) || null }).eq('id', user.id).select().single();
     if (error) return error.code === '23505' ? `@${p.username} is taken — try another` : error.message;
     prof = data; return null;
   }
@@ -176,13 +180,15 @@ const Collab = (() => {
   async function loadSpace(spaceId){
     const [{ data: s }, { data: mem }, { data: rows }] = await Promise.all([
       sb.from('spaces').select('*').eq('id', spaceId).maybeSingle(),
-      sb.from('space_members').select('role, profiles(*)').eq('space_id', spaceId),
+      sb.from('space_members').select('*').eq('space_id', spaceId),
       sb.from('space_items').select('*').eq('space_id', spaceId)
     ]);
-    if (!s) return null;
+    if (!s || !(mem || []).some(m => m.user_id === user.id && (m.status || 'active') === 'active')) return null;   // invited but not accepted yet → not ours to show
+    const pids = (mem || []).map(m => m.user_id), { data: ps } = pids.length ? await sb.from('profiles').select('*').in('id', pids) : { data: [] };
+    const pm = new Map((ps || []).map(p => [p.id, p])), person = m => ({ ...(pm.get(m.user_id) || { id: m.user_id, display_name: 'Someone', username: '' }), role: m.role, added_by: m.added_by });
     const prev = spaces.get(s.id);
     if (prev && Date.now() - (pushT.get(s.id) || 0) < 2500) s.folders = prev.folders;
-    const sp = { ...s, members: (mem || []).map(m => ({ ...m.profiles, role: m.role })).sort((a, b) => (b.role === 'owner') - (a.role === 'owner')) };
+    const sp = { ...s, members: (mem || []).filter(m => (m.status || 'active') === 'active').map(person).sort((a, b) => (b.role === 'owner') - (a.role === 'owner')), invited: (mem || []).filter(m => m.status === 'pending').map(person) };
     spaces.set(s.id, sp);
     const f = folders.find(x => x.id === sid(s.id)); if (f) Object.assign(f, folderFor(s)); else folders.push(folderFor(s));
     syncSubs(sp);
@@ -191,8 +197,8 @@ const Collab = (() => {
     return sp;
   }
   async function loadAll(){
-    const { data } = await sb.from('space_members').select('space_id').eq('user_id', user.id);
-    await Promise.all((data || []).map(m => loadSpace(m.space_id)));
+    const { data } = await sb.from('space_members').select('*').eq('user_id', user.id);
+    await Promise.all((data || []).filter(m => (m.status || 'active') === 'active').map(m => loadSpace(m.space_id)));
   }
   function subscribe(){
     if (dbChan) sb.removeChannel(dbChan);
@@ -212,14 +218,23 @@ const Collab = (() => {
         else if (!editing) renderSide();
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'space_members', filter: `user_id=eq.${user.id}` }, async p => {
+        if (p.new.status === 'pending'){   // an invite: it waits in the notification centre until you accept
+          await Notif.load(); const n = Notif.invite(p.new.space_id);
+          toast(n ? `@${n.by.username} invited you to “${n.space.name}”` : 'You have a new invite'); Notif.ping(); return;
+        }
         const sp = await loadSpace(p.new.space_id); render();
         if (sp && p.new.added_by !== user.id){ const by = sp.members.find(m => m.id === p.new.added_by); toast(`${by ? '@' + by.username : 'Someone'} shared “${sp.name}” with you`); }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'space_members' }, async p => {
         const s = (p.new && p.new.space_id) || (p.old && p.old.space_id);
-        if (p.eventType === 'DELETE' && p.old.user_id === user.id){ removeSpaceLocal(s, 'You were removed from a shared folder'); return; }
+        if (p.eventType === 'DELETE' && p.old.user_id === user.id){ removeSpaceLocal(s, 'You were removed from a shared folder'); Notif.load(); return; }
+        if (p.eventType === 'UPDATE' && p.new.status === 'active'){
+          if (p.new.user_id === user.id && !spaces.has(s)){ await loadSpace(s); render(); Notif.load(); return; }   // accepted on another device
+          if (p.new.added_by === user.id && p.new.user_id !== user.id){ await Notif.load(); const n = Notif.joined(s, p.new.user_id); if (n) toast(`@${n.by.username} joined “${n.space.name}”`); Notif.ping(); }
+        }
         if (s && spaces.has(s)){ await loadSpace(s); renderSide(); refreshShareDialog(s); }
       })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'follows', filter: `following=eq.${user.id}` }, p => People.onFollowed(p.new.follower))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'spaces' }, async p => {
         if (p.eventType === 'DELETE'){ removeSpaceLocal(p.old.id, 'A shared folder was deleted by its owner'); return; }
         const sp = spaces.get(p.new.id); if (sp){ sp.name = p.new.name; const fresh = p.new.folders && Date.now() - (pushT.get(sp.id) || 0) > 2500; if (fresh) sp.folders = p.new.folders; const f = folders.find(x => x.id === sid(sp.id)); if (f) f.name = p.new.name; if (fresh) syncSubs(sp); render(); }
@@ -312,8 +327,22 @@ const Collab = (() => {
     await sb.from('space_items').delete().eq('id', rid);
     Persist.dirty();
   }
+  // the numbers shown on your profile (how many notes, folders…) — counts only, never the contents
+  let statsT = null;
+  function statsSoon(){
+    clearTimeout(statsT); statsT = setTimeout(async () => {
+      if (!ready || !prof) return;
+      const c = t => items.filter(i => i.type === t).length;
+      const st = prof.stats && prof.stats.hidden ? { hidden: true } : { items: items.length, notes: c('note'), images: c('image'), videos: c('video'), docs: c('doc'), links: c('link'), folders: folders.length };
+      if (stable(st) === stable(prof.stats || {})) return;
+      const { error } = await sb.from('profiles').update({ stats: st }).eq('id', user.id);
+      if (!error) prof.stats = st;
+    }, 3000);
+  }
+  async function setStatsHidden(h){ prof.stats = h ? { hidden: true, _: 1 } : { _: 1 }; statsSoon(); }
   let syncing = false;
   async function reconcile(){
+    if (ready) statsSoon();
     if (!ready || syncing) return; syncing = true;
     try {
       const fOf = id => folders.find(f => f.id === id);
@@ -367,7 +396,7 @@ const Collab = (() => {
     shareFor = { target, spaceId: sp?.id };
     const label = target.type ? (target.title || 'Untitled') : target.name;
     dialog(`<h3>Share “${esc(label)}”</h3>
-      <p>Invite people by their @username. Everyone in it can see, add and edit${target.type ? ' this note' : ' everything in this folder'} — live.</p>
+      <p>Invite people by their @username. They get a notification, and once they accept they can see, add and edit${target.type ? ' this note' : ' everything in this folder'} — live.</p>
       <div class="fld"><div class="in"><span>@</span><input id="shU" placeholder="username" autocomplete="off" spellcheck="false"></div></div>
       <div id="shRes" class="shres"></div>
       <div id="shMem"></div>
@@ -381,9 +410,9 @@ const Collab = (() => {
         if (my !== seq) return;
         if (!data){ res.innerHTML = `<div class="shmuted">No one has the username @${esc(u)}</div>`; return; }
         if (data.id === user.id){ res.innerHTML = `<div class="shmuted">That's you!</div>`; return; }
-        const already = sp && spaces.get(sp.id)?.members.some(m => m.id === data.id);
+        const cur = shareFor.spaceId && spaces.get(shareFor.spaceId), already = cur && cur.members.some(m => m.id === data.id), waiting = cur && (cur.invited || []).some(m => m.id === data.id);
         found = data;
-        res.innerHTML = `<div class="shperson">${avatarOf(data, 34)}<span><b>${esc(data.display_name)}</b><small>@${esc(data.username)}</small></span><button class="btn w" id="shInv" ${already ? 'disabled' : ''}>${already ? 'Already in' : 'Invite'}</button></div>`;
+        res.innerHTML = `<div class="shperson">${avatarOf(data, 34)}<span><b>${esc(data.display_name)}</b><small>@${esc(data.username)}</small></span><button class="btn w" id="shInv" ${already || waiting ? 'disabled' : ''}>${already ? 'Already in' : waiting ? 'Invited' : 'Invite'}</button></div>`;
         const inv = $('#shInv'); if (inv) inv.onclick = () => invite(found, inv);
       };
       let t; U.oninput = () => { clearTimeout(t); t = setTimeout(look, 220); };
@@ -396,10 +425,10 @@ const Collab = (() => {
     btn.disabled = true; btn.textContent = 'Inviting…';
     try {
       const sp = await ensureSpace(shareFor.target); shareFor.spaceId = sp.id;
-      const { error } = await sb.from('space_members').insert({ space_id: sp.id, user_id: p.id, role: 'editor', added_by: user.id });
+      const { error } = await sb.from('space_members').insert({ space_id: sp.id, user_id: p.id, role: 'editor', added_by: user.id, status: 'pending' });
       if (error && error.code !== '23505') throw error;
       await loadSpace(sp.id); renderSide(); drawMembers();
-      btn.textContent = 'Invited ✓'; toast(`Shared with @${p.username}`);
+      btn.textContent = 'Invite sent ✓'; toast(`Invite sent to @${p.username}`);
       $('#shU').value = ''; setTimeout(() => { if ($('#shRes')) $('#shRes').innerHTML = ''; }, 900);
     } catch (e) { btn.disabled = false; btn.textContent = 'Invite'; toast(e.message || 'Invite failed'); }
   }
@@ -409,7 +438,7 @@ const Collab = (() => {
     if (!sp){ el.innerHTML = `<div class="shmuted" style="margin-top:4px">Only you — not shared yet.</div>`; return; }
     const owner = sp.owner === user.id;
     el.innerHTML = `<div class="shlist">${sp.members.map(m => `<div class="shperson">${avatarOf(m, 30)}<span><b>${esc(m.display_name)}${m.id === user.id ? ' (you)' : ''}</b><small>@${esc(m.username)}</small></span>
-      ${m.role === 'owner' ? '<em>Owner</em>' : owner ? `<button class="btn" data-rm="${m.id}">Remove</button>` : m.id === user.id ? `<button class="btn" data-rm="${m.id}">Leave</button>` : '<em>Editor</em>'}</div>`).join('')}</div>`;
+      ${m.role === 'owner' ? '<em>Owner</em>' : owner ? `<button class="btn" data-rm="${m.id}">Remove</button>` : m.id === user.id ? `<button class="btn" data-rm="${m.id}">Leave</button>` : '<em>Editor</em>'}</div>`).join('')}${(sp.invited || []).map(m => `<div class="shperson shwait">${avatarOf(m, 30)}<span><b>${esc(m.display_name)}</b><small>@${esc(m.username)} · waiting for them to accept</small></span>${owner || m.added_by === user.id ? `<button class="btn" data-rm="${m.id}" data-cancel="1">Cancel</button>` : '<em>Invited</em>'}</div>`).join('')}</div>`;
     el.onclick = async e => {
       const b = e.target.closest('[data-rm]'); if (!b) return;
       b.disabled = true;
@@ -679,6 +708,262 @@ const Collab = (() => {
     };
   }
 
+  /* =====================  people: search, profiles, follow  ===================== */
+  const People = (() => {
+    let iFollow = new Set(), followsMe = new Set(), seq = 0, qT = null, shownAt = 0;
+    const cache = new Map();
+    const S = { q: '', results: null, tab: null, lists: {}, who: null, wtab: 'followers', wlists: {} };
+    const host = () => $('#peoplev');
+    const num = v => { v = +v || 0; return v >= 1e6 ? (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : v >= 1e4 ? Math.round(v / 1e3) + 'K' : v >= 1e3 ? (v / 1e3).toFixed(1).replace(/\.0$/, '') + 'K' : String(v); };
+    const pl = (v, w) => `${num(v)} ${w}${(+v || 0) === 1 ? '' : 's'}`;
+    const keep = p => { const c = cache.get(p.id); if (c){ Object.assign(c, p); return c; } cache.set(p.id, p); return p; };
+    function reset(){ iFollow = new Set(); followsMe = new Set(); cache.clear(); Object.assign(S, { q: '', results: null, tab: null, lists: {}, who: null, wlists: {} }); shownAt = 0; const h = host(); if (h) h.innerHTML = ''; }
+
+    async function loadMine(){
+      const [a, b, me] = await Promise.all([
+        sb.from('follows').select('following').eq('follower', user.id),
+        sb.from('follows').select('follower').eq('following', user.id),
+        sb.from('profiles').select('*').eq('id', user.id).maybeSingle()
+      ]);
+      iFollow = new Set((a.data || []).map(r => r.following)); followsMe = new Set((b.data || []).map(r => r.follower));
+      if (me.data){ const st = prof.stats; Object.assign(prof, me.data); if (st && st._) prof.stats = st; }
+    }
+    async function profilesOf(ids){
+      if (!ids.length) return [];
+      const { data } = await sb.from('profiles').select('*').in('id', ids.slice(0, 200));
+      const m = new Map((data || []).map(p => [p.id, keep(p)])); return ids.map(i => m.get(i)).filter(Boolean);
+    }
+    async function listFor(id, kind){
+      const col = kind === 'followers' ? 'follower' : 'following', by = kind === 'followers' ? 'following' : 'follower';
+      const { data } = await sb.from('follows').select(col + ', created_at').eq(by, id).order('created_at', { ascending: false }).limit(200);
+      return profilesOf((data || []).map(r => r[col]));
+    }
+    async function discover(){
+      const { data } = await sb.from('profiles').select('*').neq('id', user.id).order('followers', { ascending: false }).limit(40);
+      return (data || []).map(keep).filter(p => !iFollow.has(p.id)).sort((a, b) => (b.followers || 0) - (a.followers || 0)).slice(0, 20);
+    }
+    async function search(q){
+      S.q = q; const my = ++seq;
+      const term = q.replace(/^@+/, '').replace(/[,()%*\\"']/g, ' ').trim().slice(0, 40);
+      if (!term){ S.results = null; S.q = ''; draw(); return; }
+      S.results = null; S.who = null; draw();
+      const { data } = await sb.from('profiles').select('*').or(`username.ilike.%${term}%,display_name.ilike.%${term}%`).limit(25);
+      if (my !== seq) return;
+      const t = term.toLowerCase(), rank = p => { const u = String(p.username).toLowerCase(), d = String(p.display_name).toLowerCase(); return u === t ? 0 : u.startsWith(t) ? 1 : d.startsWith(t) ? 2 : 3; };
+      S.results = (data || []).map(keep).sort((a, b) => rank(a) - rank(b) || (b.followers || 0) - (a.followers || 0));
+      draw();
+    }
+    async function loadTab(){
+      const tab = S.tab; if (S.lists[tab]) return;
+      const l = tab === 'discover' ? await discover() : await listFor(user.id, tab);
+      S.lists[tab] = l; if (!S.who && !S.q) draw();
+    }
+    async function loadWho(){
+      const w = S.who, tab = S.wtab; if (!w || S.wlists[tab]) return;
+      const l = await listFor(w.id, tab); if (S.who !== w) return;
+      S.wlists[tab] = l; draw();
+    }
+    async function openProfile(id){
+      S.who = cache.get(id) || (id === user.id ? keep({ ...prof }) : { id, display_name: '…', username: '' }); S.wtab = 'followers'; S.wlists = {}; draw();
+      host().scrollTop = 0;
+      const { data } = await sb.from('profiles').select('*').eq('id', id).maybeSingle();
+      if (!data){ if (S.who && S.who.id === id){ S.who = null; draw(); toast("That profile isn't available"); } return; }
+      const p = keep(data); if (S.who && S.who.id === id){ S.who = p; draw(); loadWho(); }
+    }
+    async function toggle(id, btn){
+      const on = iFollow.has(id); if (btn) btn.disabled = true;
+      const { error } = on ? await sb.from('follows').delete().eq('follower', user.id).eq('following', id) : await sb.from('follows').insert({ follower: user.id, following: id });
+      if (error && error.code !== '23505'){ toast(error.message || "Couldn't update — try again"); if (btn) btn.disabled = false; return; }
+      on ? iFollow.delete(id) : iFollow.add(id);
+      prof.following = Math.max(0, (prof.following || 0) + (on ? -1 : 1));
+      const c = cache.get(id); if (c) c.followers = Math.max(0, (c.followers || 0) + (on ? -1 : 1));
+      if (!on) delete S.lists.following;
+      if (S.who && S.who.id === id){ S.wlists = {}; loadWho(); }
+      draw(); if (c && !on) toast(`You're following @${c.username}`);
+    }
+    async function onFollowed(fid){
+      if (!ready || followsMe.has(fid)) return;
+      followsMe.add(fid); prof.followers = (prof.followers || 0) + 1; delete S.lists.followers;
+      const [p] = await profilesOf([fid]);
+      if (p) toast(`@${p.username} followed you${iFollow.has(fid) ? ' back' : ''}`);
+      Notif.load().then(() => Notif.ping());
+      if (view === 'people'){ if (!S.who && !S.q && S.tab === 'followers') loadTab(); draw(); }
+    }
+
+    /* ---------- drawing ---------- */
+    function fbtn(p){
+      if (p.id === user.id) return '';
+      const on = iFollow.has(p.id);
+      return `<button class="pfb${on ? ' on' : ''}" data-follow="${p.id}">${on ? '<span class="a">Following</span><span class="b">Unfollow</span>' : followsMe.has(p.id) ? 'Follow back' : 'Follow'}</button>`;
+    }
+    function rowHTML(p){
+      const st = p.stats || {}, bits = [`@${esc(p.username)}`, pl(p.followers, 'follower')];
+      if (!st.hidden && st.notes != null) bits.push(pl(st.notes, 'note'));
+      return `<div class="prow" data-p="${p.id}">${avatarOf(p, 42)}<div class="pi"><b><span>${esc(p.display_name)}</span>${p.id === user.id ? '<i class="pfy">You</i>' : followsMe.has(p.id) ? '<i class="pfy">Follows you</i>' : ''}</b><small>${bits.join(' · ')}</small>${p.bio ? `<p>${esc(p.bio)}</p>` : ''}</div>${fbtn(p)}</div>`;
+    }
+    const listHTML = (l, empty) => !l ? '<div class="pempty">Loading…</div>' : l.length ? l.map(rowHTML).join('') : `<div class="pempty">${empty}</div>`;
+    function homeHTML(){
+      const tabs = [['following', 'Following', prof.following], ['followers', 'Followers', prof.followers], ['discover', 'Discover', null]];
+      const empty = { following: "You're not following anyone yet.<br>Search for someone above, or look in Discover.", followers: 'No followers yet. When someone follows you, they show up here.', discover: 'No one new to suggest right now.' }[S.tab];
+      return `<div class="pme" data-p="${user.id}">${avatarOf(prof, 46)}<div class="pi"><b><span>${esc(prof.display_name)}</span></b><small>@${esc(prof.username)} · ${pl(prof.followers, 'follower')} · ${num(prof.following)} following</small></div><span class="pview">View profile ›</span></div>
+        <div class="ptabs">${tabs.map(([k, l, c]) => `<button class="${S.tab === k ? 'on' : ''}" data-tab="${k}">${l}${c != null ? `<em>${num(c)}</em>` : ''}</button>`).join('')}</div>
+        <div class="plist">${listHTML(S.lists[S.tab], empty)}</div>`;
+    }
+    function resultsHTML(){
+      return `<div class="plabel">${S.results ? `${S.results.length ? S.results.length : 'No'} result${S.results.length === 1 ? '' : 's'} for “${esc(S.q.trim())}”` : 'Searching…'}</div>
+        <div class="plist">${listHTML(S.results, 'No one found with that name or @username.<br>Check the spelling, or try part of the name.')}</div>`;
+    }
+    function profileHTML(p){
+      const me = p.id === user.id, st = p.stats || {}, hid = !!st.hidden;
+      const stat = (v, l, k) => `<button class="pst${k && S.wtab === k ? ' on' : ''}"${k ? ` data-wtab="${k}"` : ' disabled'}><b>${num(v)}</b><small>${l}</small></button>`;
+      const mix = [['images', 'image'], ['videos', 'video'], ['docs', 'doc'], ['links', 'link']].filter(([k]) => st[k] > 0).map(([k, w]) => pl(st[k], w)).join(' · ');
+      const joined = p.created_at ? `Joined ${new Date(p.created_at).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}` : '';
+      return `<button class="ib pback" data-back>‹ People</button>
+        <div class="phero">${avatarOf(p, 88)}<div class="ph1"><h1>${esc(p.display_name)}</h1><p><span>@${esc(p.username)}</span>${!me && followsMe.has(p.id) ? '<i class="pfy">Follows you</i>' : ''}</p>${p.bio ? `<div class="pbio">${esc(p.bio)}</div>` : ''}<small>${joined}</small></div>${me ? '<button class="pfb ghost" data-edit>Edit profile</button>' : p.username ? fbtn(p) : ''}</div>
+        <div class="pstats">${stat(p.followers, 'Followers', 'followers')}${stat(p.following, 'Following', 'following')}${hid ? '' : stat(st.notes, 'Notes') + stat(st.folders, 'Folders') + stat(st.items, 'Items')}</div>
+        ${!hid && mix ? `<div class="pmix">Also ${mix}</div>` : hid ? `<div class="pmix">${me ? 'Your' : 'Their'} note and folder counts are hidden.</div>` : ''}
+        <div class="ptabs"><button class="${S.wtab === 'followers' ? 'on' : ''}" data-wtab="followers">Followers</button><button class="${S.wtab === 'following' ? 'on' : ''}" data-wtab="following">Following</button></div>
+        <div class="plist">${listHTML(S.wlists[S.wtab], S.wtab === 'followers' ? 'No followers yet.' : 'Not following anyone yet.')}</div>`;
+    }
+    function draw(){
+      const b = $('#pplB'); if (!b) return;
+      b.innerHTML = S.who ? profileHTML(S.who) : S.q ? resultsHTML() : homeHTML();
+      const inp = $('#pplQ'); if (inp){ if (document.activeElement !== inp && inp.value !== S.q) inp.value = S.q; inp.parentElement.classList.toggle('has', !!inp.value); }
+    }
+    function build(){
+      const h = host();
+      h.innerHTML = `<div class="ppl"><div class="phead"><h1>People</h1><div class="psearch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="pplQ" placeholder="Search by name or @username" autocomplete="off" spellcheck="false"><button id="pplX" title="Clear">✕</button></div></div><div id="pplB"></div></div>`;
+      const inp = $('#pplQ');
+      inp.oninput = () => { inp.parentElement.classList.toggle('has', !!inp.value); clearTimeout(qT); qT = setTimeout(() => search(inp.value), 220); };
+      inp.onkeydown = e => { if (e.key === 'Escape'){ e.stopPropagation(); inp.value = ''; search(''); inp.blur(); } if (e.key === 'Enter'){ clearTimeout(qT); search(inp.value); } };
+      $('#pplX').onclick = () => { inp.value = ''; search(''); inp.focus(); };
+      h.onclick = e => {
+        const f = e.target.closest('[data-follow]'); if (f){ e.stopPropagation(); toggle(f.dataset.follow, f); return; }
+        if (e.target.closest('[data-back]')){ S.who = null; draw(); if (!S.q) loadTab(); return; }
+        if (e.target.closest('[data-edit]')){ view = 'account'; render(); return; }
+        const t = e.target.closest('[data-tab]'); if (t){ S.tab = t.dataset.tab; draw(); loadTab(); return; }
+        const w = e.target.closest('[data-wtab]'); if (w){ S.wtab = w.dataset.wtab; draw(); loadWho(); return; }
+        const p = e.target.closest('[data-p]'); if (p) openProfile(p.dataset.p);
+      };
+    }
+    async function refresh(){
+      await loadMine();
+      if (!S.tab) S.tab = iFollow.size ? 'following' : 'discover';
+      S.lists = {}; draw(); loadTab(); if (S.who) { S.wlists = {}; loadWho(); }
+    }
+    function show(){
+      const h = host(); if (!h) return;
+      if (!ready){ h.innerHTML = '<div class="ppl"><div class="pempty">Sign in to find and follow people.</div></div>'; return; }
+      if (!h.querySelector('#pplB')){ build(); draw(); }
+      if (Date.now() - shownAt > 12000){ shownAt = Date.now(); refresh(); }
+    }
+    // from the search box in the title bar: "@name" jumps here
+    function find(q){ show(); const inp = $('#pplQ'); if (inp) inp.value = q; clearTimeout(qT); qT = setTimeout(() => search(q), 200); }
+    function openMe(){ view = 'people'; render(); openProfile(user.id); }
+    let mineLoaded = false;
+    const ensure = async () => { if (!mineLoaded){ mineLoaded = true; await loadMine(); } };
+    return { show, find, reset: () => { mineLoaded = false; reset(); }, onFollowed, openMe, ensure, toggle, isFollowing: id => iFollow.has(id), open: id => { view = 'people'; if (open) closeItem(); render(); openProfile(id); }, counts: () => prof ? { followers: prof.followers || 0, following: prof.following || 0 } : null };
+  })();
+
+  /* =====================  notification centre  ===================== */
+  const Notif = (() => {
+    let list = [], panel = null, bell = null, busy = new Set(), wired = false;
+    const key = () => 'stash-notif-seen:' + (user ? user.id : '');
+    const seen = () => { try { return +localStorage.getItem(key()) || 0; } catch (e) { return 0; } };
+    const markSeen = () => { try { localStorage.setItem(key(), String(Date.now())); } catch (e) {} };
+    const unread = n => n.kind === 'invite' || n.t > seen();
+    function mount(){
+      if (bell) return;
+      bell = document.createElement('button'); bell.className = 'nbell'; bell.id = 'bell'; bell.title = 'Notifications';
+      bell.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9z"/><path d="M10 20a2.2 2.2 0 0 0 4 0"/></svg><i></i>';
+      const bar = $('.bar'), before = $('#talkTop') || $('#askTop'); bar.insertBefore(bell, before);
+      bell.onclick = e => { e.stopPropagation(); panel ? close() : openPanel(); };
+      if (!wired){ wired = true;
+        addEventListener('pointerdown', e => { if (panel && bell && !panel.contains(e.target) && !bell.contains(e.target)) close(); }, true);
+        addEventListener('keydown', e => { if (e.key === 'Escape' && panel){ e.stopPropagation(); close(); } }, true); }
+    }
+    function reset(){ list = []; close(true); if (bell){ bell.remove(); bell = null; } }
+    async function load(){
+      if (!user) return;
+      await People.ensure();
+      const [inv, fol, acc] = await Promise.all([
+        sb.from('space_members').select('*').eq('user_id', user.id).eq('status', 'pending'),
+        sb.from('follows').select('follower, created_at').eq('following', user.id).order('created_at', { ascending: false }).limit(30),
+        sb.from('space_members').select('*').eq('added_by', user.id).eq('status', 'active').limit(100)
+      ]);
+      const invs = inv.data || [], fols = fol.data || [], accs = (acc.data || []).filter(r => r.user_id !== user.id && r.accepted_at);
+      const sids = [...new Set([...invs, ...accs].map(r => r.space_id))], pids = [...new Set([...invs.map(r => r.added_by), ...fols.map(r => r.follower), ...accs.map(r => r.user_id)].filter(Boolean))];
+      const [sp, ps] = await Promise.all([sids.length ? sb.from('spaces').select('*').in('id', sids) : { data: [] }, pids.length ? sb.from('profiles').select('*').in('id', pids) : { data: [] }]);
+      const SP = new Map((sp.data || []).map(x => [x.id, x])), P = new Map((ps.data || []).map(x => [x.id, x]));
+      list = [
+        ...invs.map(r => ({ id: 'i:' + r.space_id, kind: 'invite', t: Date.parse(r.added_at) || Date.now(), space: SP.get(r.space_id), by: P.get(r.added_by) })),
+        ...fols.map(r => ({ id: 'f:' + r.follower, kind: 'follow', t: Date.parse(r.created_at) || Date.now(), by: P.get(r.follower) })),
+        ...accs.map(r => ({ id: 'a:' + r.space_id + ':' + r.user_id, kind: 'joined', t: Date.parse(r.accepted_at), space: SP.get(r.space_id), by: P.get(r.user_id) }))
+      ].filter(n => n.by && (n.kind === 'follow' || n.space)).sort((a, b) => (b.kind === 'invite') - (a.kind === 'invite') || b.t - a.t).slice(0, 60);
+      badge(); if (panel) draw();
+    }
+    function badge(){
+      if (!bell) return; const c = list.filter(unread).length;
+      bell.classList.toggle('has', c > 0); bell.querySelector('i').textContent = c > 9 ? '9+' : c || '';
+    }
+    function ping(){ if (!bell) return; bell.classList.remove('ping'); void bell.offsetWidth; bell.classList.add('ping'); }
+    function rowHTML(n){
+      const who = `<b>${esc(n.by.display_name)}</b>`, where = n.space ? `<b>${esc(n.space.name)}</b>` : '', un = unread(n);
+      let text, act = '';
+      if (n.kind === 'invite'){
+        text = `${who} invited you to ${where}`;
+        act = `<div class="nact"><button class="nbtn pri" data-acc="${n.space.id}" ${busy.has(n.id) ? 'disabled' : ''}>Accept</button><button class="nbtn" data-dec="${n.space.id}" ${busy.has(n.id) ? 'disabled' : ''}>Decline</button></div>`;
+      } else if (n.kind === 'follow'){
+        text = `${who} followed you`;
+        act = `<div class="nact">${People.isFollowing(n.by.id) ? '<span class="ndone">Following</span>' : `<button class="nbtn pri" data-fb="${n.by.id}">Follow back</button>`}</div>`;
+      } else text = `${who} accepted your invite to ${where}`;
+      return `<div class="nrow${un ? ' un' : ''}" data-n="${n.id}">${avatarOf(n.by, 36)}<div class="nt"><p>${text}</p><small>@${esc(n.by.username)} · ${ago(n.t)}</small>${act}</div>${un ? '<i class="ndot"></i>' : ''}</div>`;
+    }
+    function draw(){
+      if (!panel) return;
+      const inv = list.filter(n => n.kind === 'invite'), rest = list.filter(n => n.kind !== 'invite');
+      panel.querySelector('.nlist').innerHTML = list.length
+        ? (inv.length ? `<h6>Invites</h6>${inv.map(rowHTML).join('')}` : '') + (rest.length ? `${inv.length ? '<h6>Earlier</h6>' : ''}${rest.map(rowHTML).join('')}` : '')
+        : `<div class="nempty"><b>You're all caught up</b>Invites and new followers will show up here.</div>`;
+      panel.querySelector('[data-read]').style.visibility = rest.some(unread) ? '' : 'hidden';
+    }
+    function openPanel(){
+      panel = document.createElement('div'); panel.className = 'npanel';
+      panel.innerHTML = `<header><b>Notifications</b><button data-read>Mark all as read</button></header><div class="nlist"></div>`;
+      $('#app').appendChild(panel); bell.classList.add('open'); draw(); load();
+      panel.onclick = async e => {
+        const acc = e.target.closest('[data-acc]'), dec = e.target.closest('[data-dec]'), fb = e.target.closest('[data-fb]');
+        if (acc){ e.stopPropagation(); return accept(acc.dataset.acc); }
+        if (dec){ e.stopPropagation(); return decline(dec.dataset.dec); }
+        if (fb){ e.stopPropagation(); fb.disabled = true; await People.toggle(fb.dataset.fb); draw(); return; }
+        if (e.target.closest('[data-read]')){ markSeen(); badge(); draw(); return; }
+        const r = e.target.closest('[data-n]'); if (!r) return;
+        const n = list.find(x => x.id === r.dataset.n); if (!n || n.kind === 'invite') return;
+        close();
+        if (n.kind === 'follow') People.open(n.by.id);
+        else if (spaces.has(n.space.id)){ if (open) closeItem(); view = sid(n.space.id); render(); }
+      };
+    }
+    function close(silent){ if (!panel) return; panel.remove(); panel = null; if (bell) bell.classList.remove('open'); if (!silent){ markSeen(); badge(); } }
+    async function accept(spaceId){
+      const n = list.find(x => x.id === 'i:' + spaceId); if (!n || busy.has(n.id)) return;
+      busy.add(n.id); draw();
+      const { error } = await sb.from('space_members').update({ status: 'active', accepted_at: new Date().toISOString() }).eq('space_id', spaceId).eq('user_id', user.id);
+      busy.delete(n.id);
+      if (error){ toast(error.message || "Couldn't accept — try again"); draw(); return; }
+      list = list.filter(x => x !== n); badge();
+      const sp = await loadSpace(spaceId);
+      close(); if (sp){ if (open) closeItem(); view = sid(spaceId); render(); toast(`You joined “${sp.name}”`); } else { render(); toast("That invite isn't available any more"); }
+    }
+    async function decline(spaceId){
+      const n = list.find(x => x.id === 'i:' + spaceId); if (!n || busy.has(n.id)) return;
+      busy.add(n.id); draw();
+      await sb.from('space_members').delete().eq('space_id', spaceId).eq('user_id', user.id);
+      busy.delete(n.id); list = list.filter(x => x !== n); badge(); draw(); toast('Invite declined');
+    }
+    return { mount, load, reset, ping, invite: s => list.find(n => n.id === 'i:' + s), joined: (s, u) => list.find(n => n.id === 'a:' + s + ':' + u) };
+  })();
+
   /* =====================  sidebar  ===================== */
   function sideHTML(row){
     if (!ready) return '';
@@ -731,6 +1016,67 @@ const Collab = (() => {
   const css = document.createElement('style');
   css.textContent = `
 .cav{display:inline-grid;place-items:center;border-radius:50%;flex:none !important;color:#fff;font-weight:600;background-size:cover;background-position:center;text-transform:uppercase}
+.nbell{position:relative;width:30px;height:28px;border-radius:8px;display:grid;place-items:center;color:rgba(255,255,255,.75);flex:none}
+.nbell:hover,.nbell.open{background:rgba(255,255,255,.09);color:#fff}
+.nbell svg{width:16px;height:16px}
+.nbell i{position:absolute;top:-3px;right:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#f24822;color:#fff;font:700 10px/16px Inter,sans-serif;font-style:normal;text-align:center;display:none;box-shadow:0 0 0 2px #1a1a1a}
+.nbell.has i{display:block}
+.nbell.ping svg{animation:nring .7s ease}
+@keyframes nring{0%,100%{transform:rotate(0)}20%{transform:rotate(-18deg)}45%{transform:rotate(14deg)}70%{transform:rotate(-8deg)}}
+.npanel{position:absolute;top:50px;right:14px;z-index:80;width:min(400px,calc(100% - 28px));max-height:min(560px,calc(100% - 70px));display:flex;flex-direction:column;border-radius:14px;background:rgba(30,30,34,.98);border:1px solid var(--line2);box-shadow:0 24px 70px rgba(0,0,0,.6);animation:fadein .16s;overflow:hidden}
+.npanel header{display:flex;align-items:center;justify-content:space-between;padding:13px 16px 11px;border-bottom:1px solid var(--line)}
+.npanel header b{font-size:14px;font-weight:600}
+.npanel header button{font-size:12px;color:#8fb4ff}.npanel header button:hover{text-decoration:underline}
+.nlist{overflow:auto;padding:6px}
+.nlist h6{font-size:10.5px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;padding:10px 10px 4px}
+.nrow{display:flex;gap:11px;padding:10px;border-radius:10px;cursor:pointer;position:relative}
+.nrow:hover{background:rgba(255,255,255,.05)}
+.nrow .nt{flex:1;min-width:0}
+.nrow p{font-size:13px;line-height:1.45;color:rgba(255,255,255,.82);word-break:break-word}.nrow p b{color:#fff;font-weight:600}
+.nrow small{display:block;font-size:11.5px;color:var(--muted);margin-top:2px}
+.ndot{flex:none;width:8px;height:8px;border-radius:50%;background:#0d99ff;margin-top:6px}
+.nact{display:flex;gap:8px;margin-top:9px;align-items:center}
+.nbtn{height:28px;padding:0 13px;border-radius:7px;font-size:12px;font-weight:600;border:1px solid var(--line2);color:#fff}
+.nbtn:hover{background:rgba(255,255,255,.07)}.nbtn:disabled{opacity:.5}
+.nbtn.pri{background:#0d99ff;border-color:#0d99ff}.nbtn.pri:hover{background:#1ea4ff}
+.ndone{font-size:12px;color:var(--muted)}
+.nempty{padding:44px 20px;text-align:center;color:var(--muted);font-size:12.5px;line-height:1.6}.nempty b{display:block;color:#fff;font-size:14px;margin-bottom:4px}
+.ppl{max-width:700px;margin:0 auto;padding:28px 24px 70px}
+.phead{display:flex;align-items:center;gap:18px;margin-bottom:18px}.phead h1{font-size:24px;font-weight:600;letter-spacing:-.03em}
+.psearch{flex:1;display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border-radius:11px;background:rgba(255,255,255,.06);border:1px solid var(--line);transition:border-color .15s}
+.psearch:focus-within{border-color:rgba(79,134,232,.75)}
+.psearch svg{width:15px;height:15px;opacity:.5;flex:none}
+.psearch input{flex:1;min-width:0;background:none;border:0;outline:0;font-size:13.5px}.psearch input::placeholder{color:var(--faint)}
+.psearch button{color:var(--faint);font-size:12px;display:none}.psearch.has button{display:block}
+.pme,.prow{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:13px;cursor:pointer;transition:background .15s}
+.prow:hover,.pme:hover{background:rgba(255,255,255,.05)}
+.pme{background:var(--card);border:1px solid var(--line);margin-bottom:16px}
+.pi{flex:1;min-width:0}
+.pi b{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:600}.pi b span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pi small{display:block;font-size:12px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pi p{font-size:12.5px;color:rgba(255,255,255,.7);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pfy{flex:none;font-style:normal;font-size:10.5px;font-weight:500;color:var(--muted);background:rgba(255,255,255,.08);padding:1px 7px;border-radius:999px;white-space:nowrap}
+.pview{font-size:12px;color:var(--muted);flex:none}
+.pfb{flex:none;height:32px;min-width:98px;padding:0 16px;border-radius:999px;background:#fff;color:#111;font-size:12.5px;font-weight:600;transition:opacity .15s,background .15s,border-color .15s}
+.pfb:hover{opacity:.9}.pfb:disabled{opacity:.5}
+.pfb.on,.pfb.ghost{background:none;color:#fff;border:1px solid var(--line2)}
+.pfb.on .b{display:none}.pfb.on:hover{border-color:rgba(255,90,90,.6);color:#ff8f87;background:rgba(255,90,90,.08);opacity:1}.pfb.on:hover .a{display:none}.pfb.on:hover .b{display:inline}
+.ptabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:8px}
+.ptabs button{padding:9px 12px;font-size:13px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.ptabs button.on{color:#fff;border-color:#4f86e8}.ptabs em{font-style:normal;color:var(--faint);margin-left:6px;font-variant-numeric:tabular-nums}
+.pempty{padding:36px 12px;text-align:center;color:var(--muted);font-size:13px;line-height:1.7}
+.plabel{font-size:12px;color:var(--muted);padding:2px 4px 10px}
+.pback{margin:-6px 0 12px -8px}
+.phero{display:flex;align-items:flex-start;gap:18px;margin-bottom:20px}
+.ph1{flex:1;min-width:0}.ph1 h1{font-size:24px;font-weight:600;letter-spacing:-.03em;word-break:break-word}
+.ph1 p{font-size:13.5px;color:var(--muted);margin-top:2px;display:flex;gap:8px;align-items:center}
+.pbio{font-size:13.5px;line-height:1.5;margin-top:10px;color:rgba(255,255,255,.85);white-space:pre-wrap;word-break:break-word}
+.ph1 small{display:block;font-size:12px;color:var(--faint);margin-top:8px}
+.pstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:10px;margin-bottom:10px}
+.pst{padding:13px 14px;border-radius:12px;background:var(--card);border:1px solid var(--line);text-align:left}
+.pst:not(:disabled):hover{background:var(--card-h)}.pst:disabled{cursor:default}.pst.on{border-color:rgba(79,134,232,.6)}
+.pst b{display:block;font-size:20px;font-weight:600;letter-spacing:-.02em}.pst small{font-size:11px;color:var(--muted)}
+.pmix{font-size:12px;color:var(--muted);margin:0 2px 18px}
 .shh{display:flex;align-items:center;justify-content:space-between;padding-right:4px!important}.shh .shadd{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;color:var(--muted)}.shh .shadd:hover{background:rgba(255,255,255,.08);color:#fff}.shh .shadd svg{width:13px;height:13px}
 .nav.csub{padding-left:30px}.nav.csub svg{width:13px;height:13px}
 .nav.shhint{color:var(--muted)}
@@ -751,6 +1097,7 @@ const Collab = (() => {
 .shmuted{font-size:12.5px;color:var(--muted);padding:4px 2px;line-height:1.5}
 .shperson{display:flex;align-items:center;gap:10px;padding:8px;border-radius:10px;background:rgba(255,255,255,.04)}
 .shperson > span:not(.cav){flex:1;min-width:0}.shperson .cav{flex:none}.shperson b{display:block;font-size:13px}.shperson small{font-size:11.5px;color:var(--muted)}
+.shwait .cav{opacity:.55}.shwait b{color:rgba(255,255,255,.75)}
 .shperson em{font-style:normal;font-size:11.5px;color:var(--muted)}
 .shlist{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;margin-top:4px}
 .chist{position:absolute;top:49px;right:0;bottom:0;width:min(360px,100%);z-index:20;display:flex;flex-direction:column;background:rgba(16,16,20,.97);border-left:1px solid var(--line2);animation:fadein .2s}
@@ -773,6 +1120,7 @@ const Collab = (() => {
       else { await sb.from('space_members').delete().eq('space_id', sp.id).eq('user_id', user.id); removeSpaceLocal(sp.id, `You left “${sp.name}”`); }
     },
     isOwner: f => spaces.get(f.spaceId)?.owner === user?.id,
+    people: People, setStatsHidden, statsHidden: () => !!(prof && prof.stats && prof.stats.hidden),
     newSection, addSub, moveInto, sections: () => folders.filter(f => f.shared && !f.sub && spaces.get(f.spaceId)?.kind === 'folder'),
     enabled: () => enabled, ready: () => ready, boot, signOut, updateProfile, share, attach, detach, sideHTML, reconcile,
     me: () => prof, spaceOf: it => it && it.space ? spaces.get(it.space) : null

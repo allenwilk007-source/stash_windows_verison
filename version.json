@@ -1,6 +1,6 @@
 {
-  "version": "1.10.0",
-  "notes": "Shared sections: make a shared space for a team with its own folders \u2014 everything inside is shared",
+  "version": "1.11.0",
+  "notes": "People: search, follow and profiles. Invites now need accepting, plus a notification bell.",
   "files": [
     "index.html",
     "notes.js",

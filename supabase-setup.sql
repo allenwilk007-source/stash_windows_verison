@@ -135,4 +135,74 @@ alter table public.item_history add column if not exists doc jsonb;
 -- shared sections: folders inside a shared space
 alter table public.spaces add column if not exists folders jsonb not null default '[]'::jsonb;
 alter table public.space_items add column if not exists sub text;
+-- ---------- people: follow each other, public counts ----------
+alter table public.profiles add column if not exists bio text;
+alter table public.profiles add column if not exists stats jsonb not null default '{}'::jsonb;
+alter table public.profiles add column if not exists followers int not null default 0;
+alter table public.profiles add column if not exists following int not null default 0;
+create table if not exists public.follows (
+  follower uuid not null references public.profiles(id) on delete cascade,
+  following uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (follower, following),
+  check (follower <> following)
+);
+create index if not exists follows_following on public.follows(following, created_at desc);
+alter table public.follows enable row level security;
+drop policy if exists "follows read" on public.follows;
+create policy "follows read" on public.follows for select to authenticated using (true);
+drop policy if exists "follows add" on public.follows;
+create policy "follows add" on public.follows for insert to authenticated with check (follower = auth.uid());
+drop policy if exists "follows remove" on public.follows;
+create policy "follows remove" on public.follows for delete to authenticated using (follower = auth.uid());
+create or replace function public.bump_follow() returns trigger
+language plpgsql security definer set search_path = public as
+$$ begin
+  if tg_op = 'INSERT' then
+    update profiles set followers = followers + 1 where id = new.following;
+    update profiles set following = following + 1 where id = new.follower;
+    return new;
+  else
+    update profiles set followers = greatest(followers - 1, 0) where id = old.following;
+    update profiles set following = greatest(following - 1, 0) where id = old.follower;
+    return old;
+  end if;
+end $$;
+drop trigger if exists follows_bump on public.follows;
+create trigger follows_bump after insert or delete on public.follows for each row execute function public.bump_follow();
+grant select, insert, delete on public.follows to authenticated;
+-- people can edit their own profile, but not their own follower counts
+revoke update on public.profiles from authenticated;
+grant update (username, display_name, color, photo, bio, stats) on public.profiles to authenticated;
+do $$ begin
+  begin alter publication supabase_realtime add table public.follows; exception when duplicate_object then null; end;
+end $$;
+
+-- ---------- invites have to be accepted ----------
+alter table public.space_members add column if not exists status text not null default 'active' check (status in ('pending','active'));
+alter table public.space_members alter column status set default 'pending';
+alter table public.space_members add column if not exists accepted_at timestamptz;
+create or replace function public.is_member(s uuid) returns boolean
+language sql security definer stable set search_path = public as
+$$ select exists(select 1 from space_members where space_id = s and user_id = auth.uid() and status = 'active') $$;
+create or replace function public.has_invite(s uuid) returns boolean
+language sql security definer stable set search_path = public as
+$$ select exists(select 1 from space_members where space_id = s and user_id = auth.uid()) $$;
+create or replace function public.add_owner() returns trigger
+language plpgsql security definer set search_path = public as
+$$ begin insert into space_members(space_id, user_id, role, added_by, status) values (new.id, new.owner, 'owner', new.owner, 'active'); return new; end $$;
+drop policy if exists "spaces read" on public.spaces;
+create policy "spaces read" on public.spaces for select to authenticated using (owner = auth.uid() or has_invite(id));
+drop policy if exists "members read" on public.space_members;
+create policy "members read" on public.space_members for select to authenticated using (is_member(space_id) or user_id = auth.uid());
+drop policy if exists "members invite" on public.space_members;
+create policy "members invite" on public.space_members for insert to authenticated with check (is_member(space_id) and role = 'editor' and added_by = auth.uid() and status = 'pending');
+drop policy if exists "members accept" on public.space_members;
+create policy "members accept" on public.space_members for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid() and role = 'editor' and status = 'active');
+drop policy if exists "members remove" on public.space_members;
+create policy "members remove" on public.space_members for delete to authenticated
+  using (user_id = auth.uid() or (added_by = auth.uid() and status = 'pending') or exists(select 1 from spaces s where s.id = space_id and s.owner = auth.uid()));
+revoke update on public.space_members from authenticated;
+grant update (status, accepted_at) on public.space_members to authenticated;
+grant execute on function public.has_invite(uuid) to authenticated;
 select 'stash setup ok' as result;

@@ -357,6 +357,10 @@ input,textarea{font:inherit;color:inherit}
 .main.at-sort .head,.main.at-sort .grid,.main.at-sort .home,.main.at-sort .agent{display:none}
 /* ---------- account ---------- */
 .main.at-acct .head,.main.at-acct .grid,.main.at-acct .home,.main.at-acct .agent,.main.at-acct .sortv{display:none}
+.main.at-people .head,.main.at-people .grid,.main.at-people .home,.main.at-people .agent,.main.at-people .sortv{display:none}
+.peoplev{position:absolute;inset:0;display:none;overflow:auto}
+.main.at-people .peoplev{display:block}
+.main.viewing .peoplev{opacity:0;pointer-events:none}
 .acctv{position:absolute;inset:0;display:none;overflow:auto}
 .main.at-acct .acctv{display:block}
 .main.viewing .acctv{opacity:0;pointer-events:none}
@@ -369,6 +373,7 @@ input,textarea{font:inherit;color:inherit}
 .acstats div{padding:14px;border-radius:12px;background:var(--card);border:1px solid var(--line)}
 .acstats b{display:block;font-size:20px;font-weight:600;letter-spacing:-.02em}
 .acstats small{font-size:11px;color:var(--muted)}
+.acstats .aclick{cursor:pointer}.acstats .aclick:hover{background:var(--card-h)}
 .accard{padding:18px;border-radius:14px;background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;gap:14px;margin-bottom:14px}
 .accard h3{font-size:13px;font-weight:600}
 .fld{display:flex;flex-direction:column;gap:6px;font-size:11.5px;color:var(--muted)}
@@ -476,7 +481,7 @@ body.native .island,body.native #zoom{display:none}
     <button class="askbtn" id="askTop" title="Ask Stash (⌘J)"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.6C12.55 2.6 12.88 3.15 13.08 4.7c.62 4.7 1.52 5.6 6.22 6.22 1.55.2 2.1.53 2.1 1.08s-.55.88-2.1 1.08c-4.7.62-5.6 1.52-6.22 6.22-.2 1.55-.53 2.1-1.08 2.1s-.88-.55-1.08-2.1c-.62-4.7-1.52-5.6-6.22-6.22C3.15 12.88 2.6 12.55 2.6 12s.55-.88 2.1-1.08c4.7-.62 5.6-1.52 6.22-6.22C11.12 3.15 11.45 2.6 12 2.6Z"/></svg>Ask</button>
     <label class="search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="q" placeholder="Search" autocomplete="off">
+      <input id="q" placeholder="Search or @people" autocomplete="off">
     </label>
   </div>
 
@@ -501,6 +506,7 @@ body.native .island,body.native #zoom{display:none}
       <div id="nodes"></div>
     </section>
     <section class="acctv" id="acctv"></section>
+    <section class="peoplev" id="peoplev"></section>
     <section class="sortv" id="sortv">
       <div class="svhead">
         <div><h1>Smart Sort</h1><p>Drop files in — Stash reads each one and puts it in the right folder.</p></div>
@@ -572,7 +578,7 @@ body.native .island,body.native #zoom{display:none}
 <script src="supabase.js"></script>
 <script src="collab.js"></script>
 <script>
-if (typeof Collab === 'undefined') window.Collab = { enabled: () => false, ready: () => false, boot: async () => false, sideHTML: () => '', reconcile(){}, attach(){}, detach(){}, share(){}, signOut(){}, updateProfile: async () => null, me: () => null, spaceOf: () => null, removeFolder: async () => {}, isOwner: () => false };
+if (typeof Collab === 'undefined') window.Collab = { enabled: () => false, ready: () => false, boot: async () => false, sideHTML: () => '', reconcile(){}, attach(){}, detach(){}, share(){}, signOut(){}, updateProfile: async () => null, me: () => null, spaceOf: () => null, removeFolder: async () => {}, isOwner: () => false, people: null, statsHidden: () => false, setStatsHidden(){} };
 /* =========================================================
    1. Background — dark field with a slowly moving blue/cream
       horizon glow rising from the bottom-right corner
@@ -703,7 +709,7 @@ function thumb(it){
   let l = ''; for (let i = 0; i < 7; i++) l += `<span style="width:${55 + (i * 37) % 45}%"></span>`;
   return `<div class="doc-th"><div class="page"><div class="badge" style="background:${it.color}">${esc(it.ext)}</div>${l}</div></div>`;
 }
-const viewName = () => ({home:'Home', agent:'Ask Stash', sort:'Smart Sort', account:'Account', all:'All Items', starred:'Starred', recent:'Recent'})[view] || folders.find(f => f.id === view)?.name || '';
+const viewName = () => ({home:'Home', agent:'Ask Stash', sort:'Smart Sort', account:'Account', people:'People', all:'All Items', starred:'Starred', recent:'Recent'})[view] || folders.find(f => f.id === view)?.name || '';
 function visible(){
   const sec = folders.find(f => f.id === view && f.shared && !f.sub);
   let list = items.filter(it => view === 'all' || (view === 'starred' && it.star) || (view === 'recent' && now - it.t < 7 * day) || it.folder === view || (sec && it.space === sec.spaceId));
@@ -713,9 +719,9 @@ function visible(){
 }
 
 function renderSide(){
-  const count = id => id === 'home' || id === 'agent' || id === 'sort' || id === 'account' ? '' : id === 'all' ? items.length : id === 'starred' ? items.filter(i => i.star).length : id === 'recent' ? items.filter(i => now - i.t < 7 * day).length : items.filter(i => i.folder === id).length;
+  const count = id => id === 'home' || id === 'agent' || id === 'sort' || id === 'account' || id === 'people' ? '' : id === 'all' ? items.length : id === 'starred' ? items.filter(i => i.star).length : id === 'recent' ? items.filter(i => now - i.t < 7 * day).length : items.filter(i => i.folder === id).length;
   const row = (id, name, icon, droppable) => `<button class="nav ${view === id ? 'on' : ''}" data-v="${id}" ${droppable ? 'data-drop="1" draggable="true" title="Drag to reorder · right-click for options"' : ''}>${svg(icon)}<span>${esc(name)}</span><em>${count(id)}</em>${droppable ? '<i class="more" data-more="1">•••</i>' : ''}</button>`;
-  $('#side').innerHTML = `<h6>Library</h6>` + row('home', 'Home', 'home') + row('agent', 'Ask Stash', 'spark') + row('sort', 'Smart Sort', 'sort') + row('all', 'All Items', 'all') + row('starred', 'Starred', 'star') + row('recent', 'Recent', 'recent') +
+  $('#side').innerHTML = `<h6>Library</h6>` + row('home', 'Home', 'home') + row('agent', 'Ask Stash', 'spark') + row('sort', 'Smart Sort', 'sort') + (Collab.ready() ? row('people', 'People', 'users') : '') + row('all', 'All Items', 'all') + row('starred', 'Starred', 'star') + row('recent', 'Recent', 'recent') +
     `<h6>Folders</h6>` + folders.filter(f => !f.shared).map(f => row(f.id, f.name, f.icon, true)).join('') + Collab.sideHTML(row) +
     `<button class="nav newf" id="newFolder">${svg('plus')}<span>New Folder</span></button>` +
     (Account.me() ? `<button class="acct ${view === 'account' ? 'on' : ''}" data-v="account">${Account.avatar(Account.me())}<span class="nm2"><b>${esc(Account.me().name)}</b><small>@${esc(Account.me().username)}</small></span></button>` : '');
@@ -749,11 +755,14 @@ const render = () => {
   $('#main').classList.toggle('at-sort', atSort);
   const atAcct = view === 'account';
   $('#main').classList.toggle('at-acct', atAcct);
+  const atPeople = view === 'people';
+  $('#main').classList.toggle('at-people', atPeople);
+  if (atPeople){ $('#crumb').textContent = 'People'; Collab.people?.show(); }
   if (atAcct){ $('#crumb').textContent = 'Account'; Account.renderPage(); }
   if (atHome){ $('#crumb').textContent = 'Home'; Home.build(); }
   else if (atAgent){ $('#crumb').textContent = 'Ask Stash'; Agent.show(); }
   else if (atSort){ $('#crumb').textContent = 'Smart Sort'; }
-  else if (!atAcct) renderGrid();
+  else if (!atAcct && !atPeople) renderGrid();
   if (!atAgent) Agent.hide();
   if (atSort && !SortView.active()) SortView.show();
   if (!atSort && SortView.active()) SortView.hide();
@@ -1055,7 +1064,12 @@ addEventListener('contextmenu', e => {
   e.preventDefault(); folderMenu(folders.find(f => f.id === n.dataset.v), e.clientX, e.clientY);
 });
 $('#file').onchange = e => { addFiles([...e.target.files], isFolder(view) ? view : null); e.target.value = ''; };
-$('#q').oninput = e => { query = e.target.value; if (view === 'home'){ view = 'all'; render(); } else renderGrid(); };
+$('#q').oninput = e => {
+  const v = e.target.value;
+  // "@name" in the search box looks for people
+  if (v.startsWith('@') && Collab.ready()){ query = ''; if (open) closeItem(); if (view !== 'people'){ view = 'people'; render(); } Collab.people.find(v); return; }
+  query = v; if (view === 'home' || view === 'people' || view === 'account'){ view = 'all'; render(); } else renderGrid();
+};
 $('#side').addEventListener('click', e => {
   if (e.target.closest('#newFolder')) return newFolder();
   if (e.target.closest('#newSection, #newSection2')) return Collab.newSection?.();
@@ -2128,25 +2142,30 @@ const Account = (() => {
     if (!profile) return;
     const draft = {...profile};
     const notes = items.filter(i => i.type === 'note').length;
+    const fc = Collab.ready() && Collab.people ? Collab.people.counts() : null;
     $('#acctv').innerHTML = `<div class="acwrap">
       <div class="achero" id="aHero">${avatar(profile)}<div><h1>${esc(profile.name)}</h1><p>@${esc(profile.username)} · joined ${new Date(profile.created || Date.now()).toLocaleDateString(undefined, {month: 'long', year: 'numeric'})}</p></div></div>
-      <div class="acstats"><div><b>${items.length}</b><small>Items</small></div><div><b>${folders.length}</b><small>Folders</small></div><div><b>${notes}</b><small>Notes</small></div></div>
-      <div class="accard"><h3>Profile</h3>${formHTML(draft, 'a')}<div class="acrow"><small id="aMsg"></small><button class="btn w" id="aSave" disabled>Save changes</button></div></div>
+      <div class="acstats"${fc ? ' style="grid-template-columns:repeat(5,1fr)"' : ''}>${fc ? `<div class="aclick" id="aFol"><b>${fc.followers}</b><small>Followers</small></div><div class="aclick" id="aFing"><b>${fc.following}</b><small>Following</small></div>` : ''}<div><b>${items.length}</b><small>Items</small></div><div><b>${folders.length}</b><small>Folders</small></div><div><b>${notes}</b><small>Notes</small></div></div>
+      <div class="accard"><h3>Profile</h3>${formHTML(draft, 'a')}${fc ? `<div class="fld">Bio<div class="in"><input id="aBio" maxlength="160" placeholder="A line about you — shown on your profile" value="${esc(draft.bio || '')}" autocomplete="off"></div></div>` : ''}<div class="acrow"><small id="aMsg"></small><button class="btn w" id="aSave" disabled>Save changes</button></div></div>
+      ${fc ? `<div class="accard"><h3>Public profile</h3><div class="acrow"><small>Other people on Stash can find you by name or @username and see your follower counts. They never see what's in your notes or files.</small><button class="btn" id="aView">View my profile</button></div><label class="acrow" style="cursor:pointer"><small>Show how many notes, folders and items I have</small><input type="checkbox" id="aStats" ${Collab.statsHidden() ? '' : 'checked'} style="width:16px;height:16px;accent-color:#4f86e8"></label></div>` : ''}
       <div class="accard"><h3>Session</h3><div class="acrow"><small>${Collab.ready() ? 'Signed in online — your @username is reserved for you everywhere. Your private stuff stays on this Mac.' : 'Signing out locks Stash until you sign back in. Your stuff stays on this Mac.'}</small><button class="btn" id="aOut">Sign out</button></div></div>
     </div>`;
     let valid = true;
-    const dirtyCheck = () => $('#aSave').disabled = !valid || (draft.name.trim() === profile.name && draft.username === profile.username && draft.color === profile.color && draft.photo === profile.photo);
+    const dirtyCheck = () => $('#aSave').disabled = !valid || (draft.name.trim() === profile.name && draft.username === profile.username && draft.color === profile.color && draft.photo === profile.photo && (draft.bio || '') === (profile.bio || ''));
     wireForm('a', draft, (v, redraw) => {
       if (redraw){ $('#aHero').querySelector('.av').outerHTML = avatar(draft); $('#aC').querySelectorAll('.sw8').forEach(s => s.classList.toggle('on', !draft.photo && s.dataset.c === draft.color)); $('#aP').textContent = draft.photo ? 'Change photo' : 'Upload photo'; dirtyCheck(); return; }
       valid = v; dirtyCheck();
     });
+    if ($('#aBio')) $('#aBio').oninput = e => { draft.bio = e.target.value; dirtyCheck(); };
+    if ($('#aView')) $('#aView').onclick = $('#aFol').onclick = $('#aFing').onclick = () => Collab.people.openMe();
+    if ($('#aStats')) $('#aStats').onchange = e => { Collab.setStatsHidden(!e.target.checked); toast(e.target.checked ? 'Your counts are shown on your profile' : 'Your counts are hidden'); };
     $('#aSave').onclick = async () => {
       if (Collab.ready()){
         $('#aSave').disabled = true;
-        const err = await Collab.updateProfile({name: draft.name.trim(), username: draft.username, color: draft.color, photo: draft.photo});
+        const err = await Collab.updateProfile({name: draft.name.trim(), username: draft.username, color: draft.color, photo: draft.photo, bio: (draft.bio || '').trim()});
         if (err){ $('#aMsg').textContent = err; $('#aMsg').style.color = '#ff9d94'; $('#aSave').disabled = false; return; }
       }
-      Object.assign(profile, {name: draft.name.trim(), username: draft.username, color: draft.color, photo: draft.photo});
+      Object.assign(profile, {name: draft.name.trim(), username: draft.username, color: draft.color, photo: draft.photo, bio: (draft.bio || '').trim()});
       store(); renderSide(); renderPage(); toast('Profile saved');
     };
     $('#aOut').onclick = () => Account.signOut();
