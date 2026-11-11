@@ -541,7 +541,7 @@ body.native .island,body.native #zoom{display:none}
           <h3>Connect Claude</h3>
           <p>Without a key, Stash answers by searching your library on this device. Add your Anthropic API key and it reads your notes and documents to give real answers. The key stays in this window only and is gone when you close it.</p>
           <label>API key<input id="keyin" type="password" placeholder="sk-ant-…" autocomplete="off"></label>
-          <label>Model<input id="modelin" value="claude-sonnet-4-5" autocomplete="off"></label>
+          <label>Model<input id="modelin" value="claude-sonnet-5-5" autocomplete="off"></label>
           <div class="row"><button type="button" class="lbtn ghost" id="keyOff">Use local mode</button><button class="lbtn solid" type="submit">Connect</button></div>
         </form>
       </div>
@@ -697,11 +697,11 @@ const hueOf = s => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 
 const linkBg = it => { const h = hueOf(domainOf(it.link)); return `linear-gradient(140deg,hsl(${h} 55% 42%),hsl(${(h + 40) % 360} 60% 22%))`; };
 function thumb(it){
   if (it.type === 'link') return `<div class="link-th" style="background:${linkBg(it)}"><span class="gl">${svg('link')}</span><b>${esc(domainOf(it.link))}</b><small>${esc(it.link.replace(/^https?:\/\//, ''))}</small></div>`;
-  if (it.type === 'image') return `<img src="${it.thumb || it.src}" alt="">`;
-  if (it.type === 'video') return (it.src || it.poster ? `<img src="${it.poster || it.src}" alt="">` : `<video src="${it.vsrc || it.url}#t=0.5" muted preload="metadata"></video>`) + `<div class="play"></div><div class="dur">${esc(it.dur || '')}</div>`;
+  if (it.type === 'image') return `<img src="${esc(it.thumb || it.src)}" alt="">`;
+  if (it.type === 'video') return (it.src || it.poster ? `<img src="${esc(it.poster || it.src)}" alt="">` : `<video src="${esc(it.vsrc || it.url)}#t=0.5" muted preload="metadata"></video>`) + `<div class="play"></div><div class="dur">${esc(it.dur || '')}</div>`;
   if (it.type === 'note') return `<div class="note-th"><h4>${esc(it.title || 'Untitled')}</h4><p>${esc(it.body)}</p></div>`;
   let l = ''; for (let i = 0; i < 7; i++) l += `<span style="width:${55 + (i * 37) % 45}%"></span>`;
-  return `<div class="doc-th"><div class="page"><div class="badge" style="background:${it.color}">${esc(it.ext)}</div>${l}</div></div>`;
+  return `<div class="doc-th"><div class="page"><div class="badge" style="background:${/^#[0-9a-f]{3,8}$/i.test(it.color || '') ? it.color : '#5b5b63'}">${esc(it.ext)}</div>${l}</div></div>`;
 }
 const viewName = () => ({home:'Home', agent:'Ask Stash', sort:'Smart Sort', account:'Account', all:'All Items', starred:'Starred', recent:'Recent'})[view] || folders.find(f => f.id === view)?.name || '';
 function visible(){
@@ -825,7 +825,7 @@ function openItem(it){
   if (it.rid) setTimeout(() => { if (open === it) Collab.attach(it); }, 0);
   $('#pBack').onclick = closeItem;
   $('#pStar').onclick = () => { it.star = !it.star; openItem(it); renderSide(); };
-  $('#pMove').onchange = e => { Sorter.learn(it, it.folder, e.target.value, 'moved'); it.folder = e.target.value; toast(`Moved to ${folderLabel(folders.find(f => f.id === it.folder))}`); render(); };
+  $('#pMove').onchange = e => { if (!fitsFolder(it, e.target.value)){ toast(kindMsg(e.target.value)); e.target.value = it.folder; return; } Sorter.learn(it, it.folder, e.target.value, 'moved'); it.folder = e.target.value; toast(`Moved to ${folderLabel(folders.find(f => f.id === it.folder))}`); render(); };
   $('#pDel').onclick = () => { if (it.url) URL.revokeObjectURL(it.url); items = items.filter(x => x !== it); open = null; closeItem(); toast('Deleted'); };
 }
 // a video whose file wasn't kept (older versions dropped videos over ~80 MB) → let you re-add it in place
@@ -841,6 +841,7 @@ function wireReAdd(it){
     const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'video/*';
     inp.onchange = async () => {
       const f = inp.files[0]; if (!f) return;
+      if (!/^video\//.test(f.type)){ toast('That isn’t a video — pick a video file'); return; }
       b.textContent = 'Adding…'; b.disabled = true;
       const feat = await Sorter.read(f), fresh = makeItem(f, feat);
       Object.assign(it, {url: fresh.url, vsrc: fresh.vsrc, poster: fresh.poster || it.poster, dur: fresh.dur || it.dur, size: f.size, mime: f.type, fname: f.name});
@@ -938,7 +939,18 @@ function makeItem(f, feat){
 }
 // a known destination (you're inside a folder, or dropped onto one) files straight there;
 // otherwise Smart Sort reads each file and decides where it belongs
+// the built-in Images and Videos folders only take their own kind of file
+const FOLDER_KIND = {images: 'image', videos: 'video'};
+const fitsFolder = (it, fid) => !FOLDER_KIND[fid] || FOLDER_KIND[fid] === it.type;
+const kindMsg = fid => `Only ${FOLDER_KIND[fid]}s can go in ${folders.find(f => f.id === fid)?.name || 'that folder'}`;
+const fileKind = f => /^image\//.test(f.type) ? 'image' : /^video\//.test(f.type) ? 'video' : 'other';
 async function addFiles(files, folder){
+  const only = FOLDER_KIND[folder];
+  if (only){
+    const ok = files.filter(f => fileKind(f) === only), skipped = files.length - ok.length;
+    if (skipped) toast(`Skipped ${skipped} file${skipped > 1 ? 's' : ''} — only ${only}s go in ${folders.find(f => f.id === folder)?.name || 'this folder'}`);
+    files = ok; if (!files.length) return;
+  }
   if (!folder) return Sorter.intake(files);
   let n = 0;
   for (const f of files){
@@ -978,7 +990,7 @@ function addMenu(x, y){
   const where = isFolder(view) ? folders.find(f => f.id === view).name : null;
   menu(x, y, [
     {icon: 'note', label: 'New note', sub: where ? `in ${where}` : 'Write something down', run: newNote},
-    {icon: 'upload', label: where ? 'Upload files' : 'Upload & auto-sort', sub: where ? `Into ${where}` : 'Stash reads each file and files it', run: () => $('#file').click()},
+    {icon: 'upload', label: where ? 'Upload files' : 'Upload & auto-sort', sub: where ? `Into ${where}` : 'Stash reads each file and files it', run: () => { $('#file').accept = FOLDER_KIND[view] ? FOLDER_KIND[view] + '/*' : ''; $('#file').click(); }},
     {icon: 'link', label: 'Save a link', sub: 'Websites, articles, references', run: addLink},
   ]);
 }
@@ -1121,7 +1133,9 @@ addEventListener('drop', e => {
   }
   clearDrop();
   if (dragId && n){
-    const it = items.find(i => i.id === dragId); if (it.folder !== n.dataset.v) Sorter.learn(it, it.folder, n.dataset.v, 'moved'); it.folder = n.dataset.v; dragId = null;
+    const it = items.find(i => i.id === dragId);
+    if (!fitsFolder(it, n.dataset.v)){ dragId = null; toast(kindMsg(n.dataset.v)); return; }
+    if (it.folder !== n.dataset.v) Sorter.learn(it, it.folder, n.dataset.v, 'moved'); it.folder = n.dataset.v; dragId = null;
     toast(`Moved to ${folders.find(f => f.id === it.folder).name}`); render(); return;
   }
   if (e.dataTransfer.files.length) addFiles([...e.dataTransfer.files], n ? n.dataset.v : (isFolder(view) ? view : null));
@@ -1156,7 +1170,7 @@ const Agent = (() => {
   const fname = it => folders.find(f => f.id === it.folder)?.name || '';
   const fullText = it => [it.link, it.body, (it.sections || []).map(([h, p]) => `${h}: ${p}`).join('\n'), it.text].filter(Boolean).join('\n');
   let docs = [], idf = new Map(), words = 0, history = [], busy = false;
-  let apiKey = '', model = 'claude-sonnet-4-5', localAI = '';
+  let apiKey = '', model = 'claude-sonnet-5-5', localAI = '';
 
   function reindex(){
     docs = items.map(it => {
@@ -1265,6 +1279,7 @@ const Agent = (() => {
     const imgs = await imageBlocks();
     const msgs = history.slice(-10).map(m => ({role: m.role, content: m.content}));
     msgs.push({role: 'user', content: imgs.length ? [...imgs, {type: 'text', text: q}] : q});
+    if (window.stashNative?.claudeStream) return window.stashNative.claudeStream({model, max_tokens: 1200, system, messages: msgs}, onText);   // desktop app: key stays in the app
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true'},
@@ -1346,18 +1361,22 @@ const Agent = (() => {
   $('#msgs').addEventListener('click', e => { const s = e.target.closest('.src'); if (s){ const it = items.find(i => i.id === s.dataset.id); if (it) openItem(it); } });
   $('#agNew').onclick = () => { history = []; $('#msgs').innerHTML = ''; $('#agent').classList.remove('chatting'); $('#agin').focus(); };
   const setStatus = () => { const st = $('#agstatus'); st.classList.toggle('on', !!apiKey || !!localAI); st.querySelector('span').textContent = apiKey ? `Claude · ${model}` : localAI ? `Free AI · ${localAI}` : 'Local mode'; $('#agConnect').textContent = apiKey ? 'Settings' : 'Connect Claude'; };
-  $('#agConnect').onclick = () => { $('#keyin').value = apiKey; $('#modelin').value = model; $('#keybox').classList.add('show'); setTimeout(() => $('#keyin').focus(), 50); };
+  const savedInApp = () => !!window.stashNative?.aiSetKey && !!apiKey;
+  $('#agConnect').onclick = () => { $('#keyin').value = window.stashNative?.aiSetKey ? '' : apiKey; $('#keyin').placeholder = savedInApp() ? 'Key saved — leave blank to keep it' : 'sk-ant-…'; $('#modelin').value = model; $('#keybox').classList.add('show'); setTimeout(() => $('#keyin').focus(), 50); };
   $('#keyform').addEventListener('submit', async e => {
     e.preventDefault(); const k = $('#keyin').value.trim(), m = $('#modelin').value.trim();
     if (window.stashNative?.aiSetKey){
       // Mac app: the key is saved securely and shared with the ⌘⌥ island and Smart Sort
-      const r = await window.stashNative.aiSetKey(k, m && m !== model ? m : undefined);
+      // blank key + already connected = keep the saved key (null), maybe with a new model
+      const keep = !k && savedInApp();
+      const r = await window.stashNative.aiSetKey(keep ? null : k, m && m !== model ? m : undefined);
       if (!r.ok){ toast(r.error || "That key didn't work"); return; }
-      apiKey = k; model = r.model || model;
+      apiKey = keep || k ? 'saved-in-stash' : ''; model = r.model || model;
     } else { apiKey = k; model = m || model; }
     $('#keybox').classList.remove('show'); setStatus(); toast(apiKey ? `Claude connected · ${model}` : 'Using local mode');
   });
-  $('#keyOff').onclick = () => { apiKey = ''; $('#keybox').classList.remove('show'); setStatus(); };
+  $('#keyOff').onclick = () => { apiKey = ''; window.stashNative?.aiSetKey?.('');   // also forget the key saved in the app
+ $('#keybox').classList.remove('show'); setStatus(); };
   $('#keybox').addEventListener('click', e => { if (e.target.id === 'keybox') $('#keybox').classList.remove('show'); });
 
   const vid = $('#agvid');
@@ -1433,10 +1452,12 @@ const Sorter = (() => {
       else if (type === 'video') dur = await videoDur(f);
     } catch (e) { /* unreadable → sort by name and type only */ }
     let full = null, thumb = null, poster = null, stored = null;
-    // Mac app: videos and documents are copied into ~/Library/Application Support/Stash/files
-    try { if (window.stashNative?.storeFile && type !== 'image') stored = await window.stashNative.storeFile(f); } catch (e) { stored = null; }
+    // desktop app: images, videos and documents are copied into Stash's own files folder,
+    // so the save file only holds a small thumbnail instead of the whole image
+    try { if (window.stashNative?.storeFile) stored = await window.stashNative.storeFile(f); } catch (e) { stored = null; }
     try {
-      if (type === 'image'){ full = await fileToDataURL(f); thumb = await imageThumb(full).catch(() => full); }
+      if (type === 'image' && stored){ const u = URL.createObjectURL(f); full = stored; thumb = await imageThumb(u).catch(() => null); URL.revokeObjectURL(u); if (!thumb) thumb = stored; }
+      else if (type === 'image'){ full = await fileToDataURL(f); thumb = await imageThumb(full).catch(() => full); }
       else if (type === 'video'){ full = stored || (f.size < 80e6 ? await fileToDataURL(f) : null); poster = await videoPoster(full || URL.createObjectURL(f)); }
       else if (stored) full = stored;
       else if (window.stashNative && f.size < 60e6) full = await fileToDataURL(f);   // Mac app: keep the file so it's still there next launch
@@ -1510,13 +1531,19 @@ const Sorter = (() => {
       } catch (e) {}
     }
     content.push({type: 'text', text: `FOLDERS:\n${flist}\n\nPAST FILING DECISIONS (learn the user's habits from these):\n${les}\n\nNEW FILE: "${feat.name}" (${feat.type}${feat.dur ? ', ' + feat.dur : ''}, ${fmtSize(file?.size)})\nCONTENT:\n${feat.text.slice(0, 3500) || '(no readable text)'}\n\nReply with JSON only: {"folder_id": "<existing id or null>", "new_folder": "<short name or null>", "title": "<clean human title>", "confidence": 0-1, "reason": "<max 12 words>"}. Prefer an existing folder; only propose a new folder if nothing fits.`});
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true'},
-      body: JSON.stringify({model, max_tokens: 300, system: 'You file items into the user\'s folders in their personal library app. Follow their past decisions closely.', messages: [{role: 'user', content}]})
-    });
-    if (!res.ok) throw new Error(res.status);
-    const txt = (await res.json()).content?.map(c => c.text || '').join('') || '';
+    const body = {model, max_tokens: 300, system: 'You file items into the user\'s folders in their personal library app. Follow their past decisions closely.', messages: [{role: 'user', content}]};
+    let data;
+    if (window.stashNative?.claude){ const r = await window.stashNative.claude(body); if (!r.ok) throw new Error(r.error || r.status); data = r.json; }   // desktop app: key stays in the app
+    else {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true'},
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error(res.status);
+      data = await res.json();
+    }
+    const txt = data.content?.map(c => c.text || '').join('') || '';
     const j = JSON.parse(txt.slice(txt.indexOf('{'), txt.lastIndexOf('}') + 1));
     const folder = j.folder_id && isFolder(j.folder_id) ? j.folder_id : j.new_folder ? '__new:' + String(j.new_folder).slice(0, 40) : null;
     if (!folder) throw new Error('no folder');
@@ -1565,7 +1592,7 @@ const Sorter = (() => {
   function file(q, auto){
     if (q.status !== 'ready') return;
     const folder = resolveFolder(q.choice);
-    const it = makeItem(q.file, q.feat); it.folder = folder;
+    const it = makeItem(q.file, q.feat); it.folder = fitsFolder(it, folder) || !isFolder(HOME[it.type]) ? folder : HOME[it.type];   // Smart Sort can't put e.g. a PDF in Images
     if (q.sug.title && q.by === 'claude') it.title = q.sug.title;
     items.unshift(it); q.item = it; q.status = 'filed'; q.auto = auto; lastFiled = q;
     window.stashNative?.status(`Filed “${it.title}” in ${folders.find(f => f.id === folder)?.name}`);
@@ -1653,7 +1680,7 @@ const Sorter = (() => {
 const SortView = (() => {
   const el = $('#sortv'), tray = $('#tray'), trayHome = tray.parentElement;
   let on = false;
-  const pick = () => $('#file').click();
+  const pick = () => { $('#file').accept = FOLDER_KIND[view] ? FOLDER_KIND[view] + '/*' : ''; $('#file').click(); };
   function sync(){
     const st = Sorter.state();
     el.classList.toggle('has', st.count > 0);
@@ -1886,7 +1913,8 @@ const Persist = (() => {
         const src = it.data || (it.vsrc && /^(data|file):/.test(it.vsrc) ? it.vsrc : null) || (it.type === 'image' && it.fname ? it.src : null);
         if (src) it.url = src.startsWith('file:') ? src : toBlobURL(src);
       });
-      // older uploads kept videos inside the save file — move them to real files so they play reliably
+      // older uploads kept videos and full-size images inside the save file, which made every
+      // save rewrite all of them — move them to real files (the small thumbnail stays inline)
       if (window.stashNative?.storeFile) setTimeout(async () => {
         for (const it of items.filter(i => i.type === 'video' && i.vsrc && i.vsrc.startsWith('data:'))){
           try {
@@ -1895,10 +1923,19 @@ const Persist = (() => {
             if (url){ it.vsrc = it.url = url; if (!it.poster) it.poster = await videoPoster(url); dirty = true; render(); }
           } catch (e) {}
         }
+        for (const it of items.filter(i => i.type === 'image' && i.src && i.src.startsWith('data:'))){
+          try {
+            const blob = await (await fetch(it.src)).blob();
+            const url = await window.stashNative.storeFile(new File([blob], it.fname || (it.title + '.jpg'), {type: blob.type || it.mime || 'image/jpeg'}));
+            if (url){ if (!it.thumb || it.thumb === it.src) it.thumb = await imageThumb(it.src).catch(() => null) || url; it.src = it.url = url; it.fname = it.fname || it.title; dirty = true; }
+          } catch (e) {}
+        }
+        render();
       }, 1500);
     } catch (e) { console.warn('Stash: could not restore saved data', e); }
   }
-  if (N){ timer = setInterval(save, 1500); addEventListener('beforeunload', () => { dirty = true; save(); }); }
+  // last save when the window closes is written synchronously, so quitting can't lose the latest edits
+  if (N){ timer = setInterval(save, 1500); addEventListener('beforeunload', () => { dirty = false; if (N.saveNow) N.saveNow(snapshot()); else N.save(snapshot()); }); }
   return {dirty: () => { dirty = true; }, restore, save, native: !!N};
 })();
 
@@ -2004,7 +2041,8 @@ if (window.stashNative){
   N.onAIStatus?.(applyStatus);
   if (N.islandToggle){ const t = document.getElementById('talkTop'); t.style.display = ''; t.onclick = () => N.islandToggle(); }
   const b64ToFile = f => { const bin = atob(f.data), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return new File([a], f.name, {type: f.type}); };
-  N.onIntake(files => Sorter.intake(files.map(b64ToFile)));
+  const toFile = f => f.bytes ? new File([f.bytes], f.name, {type: f.type}) : b64ToFile(f);
+  N.onIntake(files => Sorter.intake(files.map(toFile)));
   N.onQuickNote(text => {
     const lines = text.trim().split('\n'), title = lines[0].slice(0, 80), body = lines.slice(1).join('\n').trim() || (lines[0].length > 80 ? lines[0] : '');
     const folder = isFolder('notes') ? 'notes' : (folders[0] || (folders.push({id: 'f-' + uid(), name: 'Unsorted', icon: 'folder'}), folders[0])).id;
@@ -2055,7 +2093,7 @@ const Account = (() => {
   async function pickPhoto(){
     return new Promise(res => {
       const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
-      inp.onchange = async () => { const f = inp.files[0]; if (!f) return res(null); try { res(await imageThumb(await fileToDataURL(f), 256)); } catch (e) { res(null); } };
+      inp.onchange = async () => { const f = inp.files[0]; if (!f) return res(null); if (!/^image\//.test(f.type)){ toast('That isn’t an image — pick a photo'); return res(null); } try { res(await imageThumb(await fileToDataURL(f), 256)); } catch (e) { res(null); } };
       inp.click();
     });
   }

@@ -1,32 +1,27 @@
 // Stash AI — the brain behind the ⌘⌥ island and Ask Stash.
-//
-// FREE (default): Google's Gemma 4 running on the Mac itself through Ollama.
-//   No account, no key, no cost, works offline, nothing leaves the computer. It can
-//   read your screen (Gemma 4 understands images) and use Stash's tools.
-//   One-time setup downloads the Ollama engine (~230 MB) and the model (~7–19 GB,
-//   picked to fit how much memory the Mac has).
-// OPTIONAL: connect an Anthropic key to use Claude instead (smartest, pay-per-use).
+// Runs on Claude with the user's own Anthropic key. The key is kept here in the main
+// process (encrypted with safeStorage) and is never handed to the app's pages: they send
+// their request bodies through claudeRequest / claudeStream instead.
+// (An earlier free on-device engine, Ollama + Gemma, was switched off and has been removed.)
 const { app, net, desktopCapturer, screen, systemPreferences, safeStorage, shell, clipboard } = require('electron');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
-const { spawn, execFile } = require('child_process');
 
 const file = () => path.join(app.getPath('userData'), 'ai.json');
-const cfg = { key: '', model: '', localModel: '' };
-const FALLBACK_MODEL = 'claude-sonnet-4-5';
-const OLLAMA = 'http://127.0.0.1:11434';
+const cfg = { key: '', model: '' };
+const FALLBACK_MODEL = 'claude-sonnet-5-5';   // only used if the model list can't be fetched
+const SAVED_KEY = 'saved-in-stash';   // what the pages see instead of the real key
 
 function load(){
   try {
     const j = JSON.parse(fs.readFileSync(file(), 'utf8'));
-    cfg.model = j.model || ''; cfg.localModel = j.localModel || '';
+    cfg.model = j.model || '';
     if (j.key) cfg.key = j.enc && safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(Buffer.from(j.key, 'base64')) : j.key;
   } catch (e) {}
 }
 function save(){
   const enc = safeStorage.isEncryptionAvailable();
-  fs.writeFileSync(file(), JSON.stringify({ model: cfg.model, localModel: cfg.localModel, enc, key: cfg.key ? (enc ? safeStorage.encryptString(cfg.key).toString('base64') : cfg.key) : '' }));
+  fs.writeFileSync(file(), JSON.stringify({ model: cfg.model, enc, key: cfg.key ? (enc ? safeStorage.encryptString(cfg.key).toString('base64') : cfg.key) : '' }));
 }
 
 /* =====================  Claude (optional)  ===================== */
@@ -40,104 +35,36 @@ async function pickModel(){
 }
 async function setKey(key, model){
   const old = { ...cfg };
-  cfg.key = String(key || '').trim();
+  cfg.key = key === null ? cfg.key : String(key || '').trim();   // null = keep the saved key, just change the model
   if (!cfg.key){ cfg.model = ''; save(); return { ok: true, model: '' }; }
   try { cfg.model = model || await pickModel(); save(); return { ok: true, model: cfg.model }; }
   catch (e) { Object.assign(cfg, old); return { ok: false, error: e.message }; }
 }
 
-/* =====================  Free on-device AI (Ollama + Gemma 4)  ===================== */
-const ramGB = () => os.totalmem() / 2 ** 30;
-function pickLocalModel(){
-  const gb = ramGB();
-  if (gb >= 30) return { tag: 'gemma4:26b', size: '17 GB' };
-  if (gb >= 15) return { tag: 'gemma4:12b', size: '8 GB' };
-  return { tag: 'gemma4:e4b', size: '7 GB' };
+/* ---------- the pages' Claude requests go through here, so they never hold the key ---------- */
+async function claudeRequest(body){
+  if (!cfg.key) return { ok: false, status: 401, error: 'Claude is not connected' };
+  try {
+    const r = await net.fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: headers(), body: JSON.stringify({ ...body, stream: false }) });
+    const j = await r.json().catch(() => ({}));
+    return r.ok ? { ok: true, status: r.status, json: j } : { ok: false, status: r.status, error: j.error?.message || `Claude returned ${r.status}` };
+  } catch (e) { return { ok: false, status: 0, error: e.message || String(e) }; }
 }
-const ollamaHome = () => path.join(app.getPath('userData'), 'ollama');
-function ollamaBin(){
-  const c = process.platform === 'win32' ? [path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Ollama', 'ollama.exe')] : [path.join(ollamaHome(), 'Ollama.app/Contents/Resources/ollama'), '/Applications/Ollama.app/Contents/Resources/ollama', '/opt/homebrew/bin/ollama', '/usr/local/bin/ollama'];
-  return c.find(p => { try { return fs.statSync(p).isFile(); } catch (e) { return false; } }) || null;
-}
-let ollamaProc = null;
-async function ollamaUp(){ try { const r = await net.fetch(OLLAMA + '/api/version'); return r.ok; } catch (e) { return false; } }
-async function startOllama(){
-  if (await ollamaUp()) return true;
-  const bin = ollamaBin(); if (!bin) return false;
-  if (!ollamaProc){
-    ollamaProc = spawn(bin, ['serve'], { env: { ...process.env, OLLAMA_HOST: '127.0.0.1:11434', OLLAMA_KEEP_ALIVE: '30m' }, stdio: 'ignore' });
-    ollamaProc.on('exit', () => { ollamaProc = null; });
-  }
-  for (let i = 0; i < 60; i++){ if (await ollamaUp()) return true; await new Promise(r => setTimeout(r, 250)); }
-  return false;
-}
-async function hasLocalModel(tag){
-  try { const j = await (await net.fetch(OLLAMA + '/api/tags')).json(); return (j.models || []).some(m => m.name === tag || m.model === tag || m.name === tag + ':latest'); }
-  catch (e) { return false; }
-}
-let localReady = false, setupRunning = null;
-async function checkLocal(){
-  if (!cfg.localModel){ localReady = false; return false; }
-  localReady = (await startOllama()) && await hasLocalModel(cfg.localModel);
-  return localReady;
-}
-async function download(url, dest, onPct){
-  const r = await net.fetch(url); if (!r.ok) throw new Error(`Download failed (${r.status})`);
-  const total = +r.headers.get('content-length') || 0, out = fs.createWriteStream(dest), rd = r.body.getReader();
-  let got = 0;
+async function claudeStream(body, onText){
+  if (!cfg.key) throw new Error('Claude is not connected');
+  const r = await net.fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: headers(), body: JSON.stringify({ ...body, stream: true }) });
+  if (!r.ok){ let m = `Claude returned ${r.status}`; try { m = (await r.json()).error?.message || m; } catch (e) {} throw new Error(m); }
+  const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '', full = '';
   for (;;){
     const { done, value } = await rd.read(); if (done) break;
-    out.write(Buffer.from(value)); got += value.length; if (total) onPct(got / total);
+    buf += dec.decode(value, { stream: true });
+    const ev = buf.split('\n'); buf = ev.pop();
+    for (const line of ev){
+      if (!line.startsWith('data:')) continue;
+      try { const j = JSON.parse(line.slice(5)); if (j.type === 'content_block_delta' && j.delta?.text){ full += j.delta.text; onText(full); } } catch (e) {}
+    }
   }
-  await new Promise((res, rej) => out.end(err => err ? rej(err) : res()));
-}
-const unzip = (zip, dest) => new Promise((res, rej) => execFile('/usr/bin/ditto', ['-x', '-k', zip, dest], err => err ? rej(err) : res()));
-
-/** one-click setup of the free AI; progress({stage, pct, text}) */
-function setupLocal(progress){
-  if (setupRunning) return setupRunning;
-  // the one-click engine download below is the Mac build of Ollama
-  if (process.platform !== 'darwin' && !ollamaBin()) return Promise.resolve({ ok: false, error: 'The free on-device AI is Mac-only for now. Install Ollama for Windows from ollama.com, or connect Claude instead.' });
-  setupRunning = (async () => {
-    const pick = pickLocalModel();
-    try {
-      if (!ollamaBin()){
-        progress({ stage: 'engine', pct: 0, text: 'Downloading the AI engine…' });
-        fs.mkdirSync(ollamaHome(), { recursive: true });
-        const zip = path.join(ollamaHome(), 'ollama.zip');
-        await download('https://github.com/ollama/ollama/releases/latest/download/Ollama-darwin.zip', zip, p => progress({ stage: 'engine', pct: p, text: `Downloading the AI engine… ${Math.round(p * 100)}%` }));
-        progress({ stage: 'engine', pct: 1, text: 'Unpacking…' });
-        fs.rmSync(path.join(ollamaHome(), 'Ollama.app'), { recursive: true, force: true });
-        await unzip(zip, ollamaHome()); fs.rmSync(zip, { force: true });
-      }
-      progress({ stage: 'start', pct: 0, text: 'Starting the AI engine…' });
-      if (!(await startOllama())) throw new Error("The AI engine didn't start.");
-      if (!(await hasLocalModel(pick.tag))){
-        const r = await net.fetch(OLLAMA + '/api/pull', { method: 'POST', body: JSON.stringify({ model: pick.tag, stream: true }) });
-        if (!r.ok) throw new Error(`Couldn't download the model (${r.status})`);
-        const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '';
-        for (;;){
-          const { done, value } = await rd.read(); if (done) break;
-          buf += dec.decode(value, { stream: true }); let i;
-          while ((i = buf.indexOf('\n')) >= 0){
-            const line = buf.slice(0, i); buf = buf.slice(i + 1); if (!line.trim()) continue;
-            const j = JSON.parse(line); if (j.error) throw new Error(j.error);
-            const pct = j.total ? j.completed / j.total : 0;
-            if (j.total) progress({ stage: 'model', pct, text: `Downloading the AI brain (${pick.size})… ${Math.round(pct * 100)}%` });
-            else progress({ stage: 'model', pct: 1, text: j.status === 'success' ? 'Almost done…' : 'Getting the AI ready…' });
-          }
-        }
-      }
-      cfg.localModel = pick.tag; save();
-      localReady = await hasLocalModel(pick.tag);
-      if (!localReady) throw new Error('The model download didn’t finish — try again.');
-      progress({ stage: 'done', pct: 1, text: 'Free AI is ready' });
-      return { ok: true, model: pick.tag };
-    } catch (e) {
-      return { ok: false, error: e.message || String(e) };
-    } finally { setupRunning = null; }
-  })();
-  return setupRunning;
+  return full;
 }
 
 /* =====================  the screen  ===================== */
@@ -196,8 +123,8 @@ You can save and organise things in their Stash library with your tools. When th
 Today is ${new Date().toDateString()}.
 STASH LIBRARY (for context): ${lib || '(empty)'}`;
 
-let history = [], localHistory = [], webOK = true, ME = null;
-const reset = () => { history = []; localHistory = []; };
+let history = [], webOK = true, ME = null;
+const reset = () => { history = []; };
 
 /* ---------- Claude brain ---------- */
 async function callClaude(body){
@@ -262,62 +189,11 @@ Answer any question at all, the way Claude would. Be accurate; if unsure, say so
   return { text: 'That took too many steps — try asking in a simpler way.', sources, open, ai: 'claude' };
 }
 
-/* ---------- free on-device brain ---------- */
-async function askLocal(q, ctx){
-  if (!(await startOllama())) return { text: "The free AI engine isn't running — reopen Stash and try again.", ai: 'local' };
-  // small models are better at "is the screen attached?" than at deciding to call a vision tool,
-  // so when you mention the screen, the screenshot goes straight in with your question
-  let images;
-  if (SCREEN_RE.test(q) || (localHistory.length === 0 && /\bthis\b/i.test(q) && lastShot)){
-    ctx.status('Looking at your screen…');
-    const shot = lastShot || await captureScreen();
-    if (!shot){ openScreenSettings(); return { text: NO_SCREEN_MSG, ai: 'local' }; }
-    lastShot = shot; images = [shot];
-  }
-  const tools = TOOL_DEFS.filter(t => t.name !== 'look_at_screen').map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.params } }));
-  localHistory.push(images ? { role: 'user', content: q + "\n\n(The attached image is a screenshot of the user's screen right now.)", images } : { role: 'user', content: q });
-  slim(localHistory);
-  const sources = []; let open = null;
-  for (let step = 0; step < 5; step++){
-    ctx.status(step ? 'Working on it…' : 'Thinking…');
-    const r = await net.fetch(OLLAMA + '/api/chat', { method: 'POST', body: JSON.stringify({
-      model: cfg.localModel, stream: false, keep_alive: '30m', tools,
-      options: { num_ctx: 8192, temperature: 0.4 },
-      messages: [{ role: 'system', content: systemPrompt(ctx.lib) }, ...localHistory]
-    }) });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok || j.error) throw new Error(j.error || `The free AI returned ${r.status}`);
-    const msg = j.message || { role: 'assistant', content: '' };
-    localHistory.push({ role: 'assistant', content: msg.content || '', ...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}) });
-    if (!msg.tool_calls || !msg.tool_calls.length){
-      let text = String(msg.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-      // small models sometimes write the note out instead of saving it — if you asked for a note
-      // and nothing was saved, save what it wrote (Smart Sort picks the folder)
-      if (SAVE_RE.test(q) && !sources.length && text.length > 20){
-        const body = text.replace(/^(sure|okay|ok|here(?:'s| is)[^:\n]*:)\s*/i, '').trim();
-        const title = (body.split('\n').find(l => l.trim()) || 'Screen note').replace(/^[#*\-\s]+|[*:]+$/g, '').slice(0, 60);
-        const saved = await runTool('save_note', { title, body, include_screenshot: !!images }, ctx, sources, id => open = id);
-        text = saved;
-      }
-      return { text: text || "Sorry — I didn't get that. Try asking another way.", sources, open, ai: 'local' };
-    }
-    for (const tc of msg.tool_calls){
-      let args = tc.function?.arguments || {};
-      if (typeof args === 'string'){ try { args = JSON.parse(args); } catch (e) { args = {}; } }
-      let out;
-      try { out = await runTool(tc.function?.name, args, ctx, sources, id => open = id); } catch (e) { out = 'Tool failed: ' + (e.message || e); }
-      localHistory.push({ role: 'tool', content: String(out), tool_name: tc.function?.name });
-    }
-  }
-  return { text: 'That took too many steps — try asking in a simpler way.', sources, open, ai: 'local' };
-}
-
 /** ask(q, {exec, status}) → {text, sources, open, ai} or null if no AI is set up */
 async function ask(q, { exec, status }){
   const lib = await exec('window.Stash && window.Stash.summary ? window.Stash.summary() : ""').catch(() => '');
   ME = await exec('window.Stash && window.Stash.me ? window.Stash.me() : null').catch(() => null);
   const ctx = { exec, status, lib };
-  // Stash runs on Claude (the free on-device engine is switched off)
   if (cfg.key) return askClaude(q, ctx);
   return null;
 }
@@ -327,10 +203,10 @@ let loaded = false; const ensure = () => { if (!loaded){ loaded = true; load(); 
 module.exports = {
   ask: (q, o) => { ensure(); return ask(q, o); }, reset, preCapture,
   setKey: (k, m) => { ensure(); return setKey(k, m); },
-  setupLocal: p => { ensure(); return setupLocal(p); },
-  status: async () => { ensure(); await checkLocal(); const pick = pickLocalModel(); return { claude: !!cfg.key, model: cfg.model, local: { ready: localReady, model: cfg.localModel || pick.tag, size: pick.size, installed: !!ollamaBin(), setting: !!setupRunning } }; },
-  creds: () => { ensure(); return { key: cfg.key, model: cfg.model }; },
-  hasAI: () => { ensure(); return !!cfg.key || localReady; },
-  warm: async () => { ensure(); if (false && await checkLocal() && !cfg.key){ try { await net.fetch(OLLAMA + '/api/generate', { method: 'POST', body: JSON.stringify({ model: cfg.localModel, prompt: '', keep_alive: '30m' }) }); } catch (e) {} } },
-  stop: () => { try { ollamaProc && ollamaProc.kill(); } catch (e) {} }
+  status: async () => { ensure(); return { claude: !!cfg.key, model: cfg.model, local: { ready: false, model: '', size: '', installed: false, setting: false } }; },
+  creds: () => { ensure(); return { key: cfg.key ? SAVED_KEY : '', model: cfg.model }; },
+  claudeRequest: b => { ensure(); return claudeRequest(b); },
+  claudeStream: (b, cb) => { ensure(); return claudeStream(b, cb); },
+  hasAI: () => { ensure(); return !!cfg.key; },
+  stop: () => {}
 };

@@ -1172,6 +1172,9 @@ function mount(host, it, opts = {}){
       path();
     }, () => {
       drag = null; ink.innerHTML = '';
+      // a click without dragging: the pen leaves a dot, but the highlighter leaves nothing
+      // (its flat-ended stroke turned a click into a stray diagonal "slash")
+      if (pts.length < 2 && hl) return;
       if (pts.length < 2) pts.push([p0.x + 0.5, p0.y + 0.5]);
       const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), pad = sw0 / 2 + 1;
       const x = Math.min(...xs) - pad, y = Math.min(...ys) - pad, w = Math.max(...xs) - x + pad, h = Math.max(...ys) - y + pad;
@@ -1754,13 +1757,22 @@ function mount(host, it, opts = {}){
     if (file.type.startsWith('video/')){ const v = document.createElement('video'); v.preload = 'metadata'; v.onloadedmetadata = () => { res({ w: v.videoWidth || 640, h: v.videoHeight || 360 }); URL.revokeObjectURL(u); }; v.onerror = () => res({ w: 640, h: 360 }); v.src = u; }
     else { const im = new Image(); im.onload = () => { res({ w: im.naturalWidth, h: im.naturalHeight }); URL.revokeObjectURL(u); }; im.onerror = () => res({ w: 400, h: 300 }); im.src = u; }
   });
+  // some files (e.g. .heic or .mkv on Windows) arrive with no type, so fall back to the extension
+  const isImgFile = f => /^image\//.test(f.type) || (!f.type && /\.(png|jpe?g|gif|webp|bmp|avif|svg|heic|heif)$/i.test(f.name));
+  const isVidFile = f => /^video\//.test(f.type) || (!f.type && /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(f.name));
   function pickFiles(opt){ fileIn.accept = opt.cover ? 'image/*' : 'image/*,video/*'; fileIn.onchange = () => { const fs = [...fileIn.files]; fileIn.value = ''; addFiles(fs, opt); }; fileIn.click(); }
   async function addFiles(files, opt = {}){
-    files = files.filter(f => /^(image|video)\//.test(f.type)); if (!files.length) return;
+    // only images and videos go in a page (a cover only takes an image); anything else is
+    // skipped with a message instead of silently doing nothing
+    const all = files;
+    files = all.filter(f => isImgFile(f) || (!opt.cover && isVidFile(f)));
+    const skipped = all.length - files.length;
+    if (skipped) flash(opt.cover ? 'A cover has to be an image' : `Skipped ${skipped} file${skipped > 1 ? 's' : ''} — only images and videos can go here`);
+    if (!files.length) return;
     if (opt.cover){ flash('Adding cover…'); const m = await store(files[0]); local({ t: 'm', k: 'cover', v: { src: m.src, path: m.path } }); commit(); return; }
     let at = opt.at || null, after = opt.block || null, n = 0;
     for (const f of files){
-      const vid = f.type.startsWith('video/'); flash(`Adding ${vid ? 'video' : 'image'}…`);
+      const vid = isVidFile(f); flash(`Adding ${vid ? 'video' : 'image'}…`);
       const [m, nat] = await Promise.all([store(f), natural(f)]).catch(() => [null, null]); if (!m) continue;
       if (after){ const nb = { id: uid(), t: 'img', src: m.src, path: m.path, w: nat.w < 500 ? Math.round(nat.w / 6.4) : 100, cap: '' }; if (vid) nb.vid = true;
         const ab = B(after); if (ab && ab.t === 'p' && !htmlText(ab.h).trim()){ nb.id = ab.id; local({ t: 'b', b: nb }); } else local({ t: 'b', b: nb, after }); after = nb.id; continue; }
@@ -1910,6 +1922,12 @@ function mount(host, it, opts = {}){
 
   /* ---------- start ---------- */
   renderAll(); setTool('select');
+  // remove stray highlighter "slashes" saved by older versions (a single click made a tiny stroke)
+  try {
+    const span = (o, i) => Math.max(...o.pts.map(p => p[i])) - Math.min(...o.pts.map(p => p[i]));
+    const strays = (doc.objs || []).filter(o => o.k === 'draw' && o.hl && Array.isArray(o.pts) && o.pts.length <= 2 && span(o, 0) < 2 && span(o, 1) < 2);
+    if (strays.length){ strays.forEach(o => local({ t: 'od', id: o.id })); commit(); }
+  } catch (e) {}
   layout(false);
   requestAnimationFrame(() => { layout(false); scroll.scrollLeft = Math.max(0, (ox - (scroll.clientWidth / z - (doc.meta.wide ? PAGEW.wide : PAGEW.normal)) / 2) * z); });
   const ro = new ResizeObserver(() => relayout()); ro.observe(scroll); ro.observe(page);

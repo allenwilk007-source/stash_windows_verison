@@ -18,6 +18,8 @@ let win = null, tray = null, pop = null, isl = null, islandKey = '', quitting = 
 // downloaded into ~/Library/Application Support/Stash/app and used from the next launch.
 const REPO = 'charliecurrin/stash';
 const RAW = `https://raw.githubusercontent.com/${REPO}/main`;
+// (boot.js has its own copy of `newer` on purpose: boot.js ships inside the app and is never
+// replaced by an update, so it can't rely on code from a newer main.js — keep the two in step.)
 const localVersion = () => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'version.json'), 'utf8')).version; } catch (e) { return '0.0.0'; } };
 const newer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++){ if ((x[i] || 0) > (y[i] || 0)) return true; if ((x[i] || 0) < (y[i] || 0)) return false; } return false; };
 async function fetchBuf(url){ const r = await net.fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error(`${r.status} ${url}`); return Buffer.from(await r.arrayBuffer()); }
@@ -46,7 +48,11 @@ async function installUpdate(){
   const base = path.join(app.getPath('userData'), 'app'), tmp = base + '.new';
   try {
     fs.rmSync(tmp, { recursive: true, force: true }); fs.mkdirSync(tmp, { recursive: true });
-    for (const f of remote.files) fs.writeFileSync(path.join(tmp, f), await fetchBuf(`${RAW}/${encodeURI(f)}?t=${Date.now()}`));
+    // only plain file names, never paths — a name like "../x" must not write outside the app folder
+    const files = Array.isArray(remote.files) ? remote.files : [];
+    const bad = files.filter(f => typeof f !== 'string' || !/^[\w@.-]+$/.test(f) || f.startsWith('.'));
+    if (!files.length || bad.length) throw new Error('The update lists files Stash refuses to install: ' + (bad.join(', ') || '(none)'));
+    for (const f of files) fs.writeFileSync(path.join(tmp, f), await fetchBuf(`${RAW}/${encodeURI(f)}?t=${Date.now()}`));
     fs.writeFileSync(path.join(tmp, 'version.json'), JSON.stringify(remote, null, 2));
     fs.rmSync(base, { recursive: true, force: true }); fs.renameSync(tmp, base);
     quitting = true; app.relaunch(); app.exit(0);
@@ -61,9 +67,24 @@ const MIME = {png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/g
   csv:'text/csv', json:'application/json', html:'text/html', docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'};
 const mimeOf = p => MIME[path.extname(p).slice(1).toLowerCase()] || 'application/octet-stream';
 
-// only one copy of the app at a time
-if (!app.requestSingleInstanceLock()) app.quit();
+// only one copy of the app at a time — a second copy exits immediately, before it makes
+// any windows or grabs any shortcuts (app.quit() alone lets startup carry on briefly)
+const firstInstance = app.requestSingleInstanceLock();
+if (!firstInstance) app.exit(0);
 app.on('second-instance', () => showMain());
+
+// ---------- safety: Stash's windows only ever show Stash's own pages ----------
+// Links open in the real browser, and only web/mail links. Nothing can load a website
+// *inside* a Stash window, because those windows have the stashNative bridge (your whole
+// library, saving, the AI) and a website must never get that.
+const isWebLink = u => { try { return ['http:', 'https:', 'mailto:'].includes(new URL(u).protocol); } catch (e) { return false; } };
+const openLink = u => { if (isWebLink(u)) shell.openExternal(u); };
+app.on('web-contents-created', (e, wc) => {
+  wc.setWindowOpenHandler(({ url }) => { openLink(url); return { action: 'deny' }; });
+  wc.on('will-navigate', (ev, url) => { if (!url.startsWith('file:')){ ev.preventDefault(); openLink(url); } });
+  wc.on('will-redirect', (ev, url) => { if (!url.startsWith('file:')){ ev.preventDefault(); } });
+  wc.on('will-attach-webview', ev => ev.preventDefault());
+});
 
 function createWindow(){
   // Mac: traffic lights inset into Stash's own toolbar. Windows: hide the title bar and
@@ -85,7 +106,6 @@ function createWindow(){
   win.once('ready-to-show', () => win.show());
   // closing the window keeps Stash running in the menu bar
   win.on('close', e => { if (!quitting){ e.preventDefault(); win.hide(); } });
-  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
 }
 
 function createPopover(){
@@ -154,7 +174,7 @@ while (true){
     var held = (Date.now() - t0) / 1000;
     if (held > 0.05 && held < 1.5 && sinceKey() > held - 0.03) say('tap');
   }
-  delay(0.03);
+  delay(0.05);   // 20 checks a second is plenty to catch a tap (was 33/s — less battery use)
 }`;
 function startModifierWatcher(){
   if (process.platform !== 'darwin' || quitting) return;
@@ -191,17 +211,24 @@ function togglePopover(){
 
 function showMain(){ if (!win) return; if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
 
-function sendFiles(paths){
-  const files = [];
+// Files dropped on the tray icon / picked from the menu are sent to the main window one at a
+// time as raw bytes. (Before, every file was read at once and turned into base64 text — a
+// third bigger — so a few large videos could use gigabytes of memory.)
+const MAX_INTAKE = 2 * 1024 ** 3;   // 2 GB per file
+async function sendFiles(paths){
+  let sent = 0, skipped = 0;
   for (const p of paths){
     try {
-      if (!fs.statSync(p).isFile()) continue;
-      files.push({ name: path.basename(p), type: mimeOf(p), data: fs.readFileSync(p).toString('base64') });
+      const st = await fs.promises.stat(p);
+      if (!st.isFile()) continue;
+      if (st.size > MAX_INTAKE){ skipped++; continue; }
+      const bytes = await fs.promises.readFile(p);
+      win.webContents.send('intake', [{ name: path.basename(p), type: mimeOf(p), bytes }]);
+      sent++;
     } catch (e) { /* unreadable file — skip */ }
   }
-  if (!files.length) return;
-  win.webContents.send('intake', files);
-  status(`Sorting ${files.length} file${files.length > 1 ? 's' : ''}…`);
+  if (skipped) status(`Skipped ${skipped} file${skipped > 1 ? 's' : ''} over 2 GB`, true);
+  if (sent) status(`Sorting ${sent} file${sent > 1 ? 's' : ''}…`);
 }
 
 function status(msg, needsAttention){
@@ -237,6 +264,7 @@ async function pickFiles(){
 if (IS_WIN) app.setAppUserModelId('com.charlie.stash');
 
 app.whenReady().then(() => {
+  if (!firstInstance) return;
   if (IS_WIN){
     try {
       const lnk = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Stash.lnk');
@@ -246,9 +274,10 @@ app.whenReady().then(() => {
   createWindow();
   createPopover();
   createIsland();
-  // allow the microphone for Stash's own pages
-  session.defaultSession.setPermissionRequestHandler((wc, perm, cb) => cb(perm === 'media' || perm === 'microphone' || perm === 'audioCapture'));
-  session.defaultSession.setPermissionCheckHandler((wc, perm) => perm === 'media' || perm === 'microphone' || perm === 'audioCapture');
+  // allow the microphone for Stash's own pages (file://) only
+  const micPerm = (perm, url) => (perm === 'media' || perm === 'microphone' || perm === 'audioCapture') && String(url || '').startsWith('file:');
+  session.defaultSession.setPermissionRequestHandler((wc, perm, cb, details) => cb(micPerm(perm, details?.requestingUrl || wc?.getURL())));
+  session.defaultSession.setPermissionCheckHandler((wc, perm, origin, details) => micPerm(perm, details?.requestingUrl || wc?.getURL() || origin));
 
   let icon;
   if (IS_MAC){ icon = nativeImage.createFromPath(path.join(__dirname, 'trayTemplate.png')); icon.setTemplateImage(true); }
@@ -287,10 +316,14 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('ai:setKey', async (e, key, model) => {
     const r = await AI.setKey(key, model);
-    if (r.ok && win && !win.isDestroyed()) win.webContents.send('ai-creds', AI.creds());
+    if (r.ok) [win, isl].forEach(w => { if (w && !w.isDestroyed()) w.webContents.send('ai-creds', AI.creds()); });
     return r;
   });
   ipcMain.handle('ai:creds', () => AI.creds());
+  // The Claude key never goes to the pages: they send the request body here and the main
+  // process adds the key. claudeStream sends text as it arrives via 'ai:claude-delta'.
+  ipcMain.handle('ai:claude', (e, body) => AI.claudeRequest(body));
+  ipcMain.handle('ai:claude-stream', (e, id, body) => AI.claudeStream(body, text => { try { e.sender.send('ai:claude-delta', id, text); } catch (err) {} }));
   // ---- sign-in links: the email link opens http://127.0.0.1:51789/auth, which hands the session to Stash ----
   let authServer = null;
   ipcMain.handle('auth:listen', () => {
@@ -298,6 +331,10 @@ app.whenReady().then(() => {
     const http = require('http');
     authServer = http.createServer((req, res) => {
       if (req.method === 'POST' && req.url === '/token'){
+        // Only the sign-in page this server serves may hand over tokens. Browsers always send
+        // an Origin header on a cross-site POST, so a random website trying to sign Stash into
+        // *its* account is refused here.
+        if (req.headers.origin !== 'http://127.0.0.1:51789'){ res.writeHead(403); res.end(); return; }
         let b = ''; req.on('data', d => { b += d; if (b.length > 20000) req.destroy(); });
         req.on('end', () => {
           try { const t = JSON.parse(b); if (t.access_token && t.refresh_token){ win.webContents.send('auth-tokens', t); showMain(); } } catch (e) {}
@@ -332,13 +369,8 @@ else{h.textContent="That link didn't work";p.textContent=er||'It may have expire
   ipcMain.handle('files:copy', (e, src, name) => { const d = destFor(name || path.basename(src)); fs.copyFileSync(src, d); return require('url').pathToFileURL(d).href; });
   ipcMain.handle('files:write', (e, name, bytes) => { const d = destFor(name); fs.writeFileSync(d, Buffer.from(bytes)); return require('url').pathToFileURL(d).href; });
   ipcMain.handle('ai:status', () => AI.status());
-  ipcMain.handle('ai:setupLocal', async () => {
-    const send = p => [isl, win, pop].forEach(w => { try { if (w && !w.isDestroyed()) w.webContents.send('ai:setup', p); } catch (e) {} });
-    const r = await AI.setupLocal(send);
-    if (r.ok){ send({ stage: 'done', pct: 1, text: 'Free AI is ready' }); try { win.webContents.send('ai-status', await AI.status()); } catch (e) {} }
-    return r;
-  });
-  setTimeout(() => AI.warm(), 6000);   // start the free AI engine in the background so the first answer is quick
+  // the free on-device AI (Ollama) was switched off; its download/start-up code has been removed
+  ipcMain.handle('ai:setupLocal', () => ({ ok: false, error: 'The free on-device AI is no longer available — connect Claude instead.' }));
   ipcMain.handle('island:command', async (e, q) => {
     try { return await win.webContents.executeJavaScript(`window.Stash && window.Stash.command ? window.Stash.command(${JSON.stringify(String(q))}) : null`); }
     catch (err) { return { text: 'Something went wrong: ' + (err.message || err) }; }
@@ -348,9 +380,37 @@ else{h.textContent="That link didn't work";p.textContent=er||'It may have expire
 
   // ---- storage ----
   ipcMain.handle('store:load', () => { try { return fs.readFileSync(dataFile(), 'utf8'); } catch (e) { return null; } });
-  ipcMain.on('store:save', (e, json) => {
-    const tmp = dataFile() + '.tmp';
-    fs.writeFile(tmp, json, err => { if (!err) fs.rename(tmp, dataFile(), () => {}); });
+  // One save at a time: if a new snapshot arrives while one is being written, it waits and
+  // only the newest waiting snapshot is written next (older ones are already out of date).
+  // Each write goes to its own temp file and is then swapped in, so a crash mid-write never
+  // leaves a half-written library. Failures are reported instead of silently ignored.
+  let writing = false, queued = null, saveSeq = 0, saveFailed = false;
+  const reportSave = err => {
+    if (err && !saveFailed){ saveFailed = true; dialog.showMessageBox({ type: 'warning', message: "Stash couldn't save your changes", detail: String(err.message || err) + '\n\nStash will keep trying. Check that your disk isn\'t full.' }); }
+    if (!err) saveFailed = false;
+  };
+  let finalSaved = false;   // once the closing save is on disk, no older background save may replace it
+  async function writeStore(json){
+    if (finalSaved) return;
+    if (writing){ queued = json; return; }
+    writing = true;
+    const tmp = `${dataFile()}.${process.pid}.${++saveSeq}.tmp`;
+    try {
+      await fs.promises.writeFile(tmp, json);
+      if (finalSaved) await fs.promises.rm(tmp, { force: true });
+      else { await fs.promises.rename(tmp, dataFile()); reportSave(null); }
+    }
+    catch (err) { reportSave(err); fs.promises.rm(tmp, { force: true }).catch(() => {}); }
+    writing = false;
+    if (queued !== null){ const next = queued; queued = null; writeStore(next); }
+  }
+  ipcMain.on('store:save', (e, json) => writeStore(json));
+  // final save when the window is closing: written synchronously so it's on disk before the app exits
+  ipcMain.on('store:save-now', (e, json) => {
+    queued = null;
+    const tmp = `${dataFile()}.${process.pid}.final.tmp`;
+    try { fs.writeFileSync(tmp, json); fs.renameSync(tmp, dataFile()); finalSaved = quitting; e.returnValue = true; }
+    catch (err) { console.warn('final save failed', err); e.returnValue = false; }
   });
 
   // ---- main window → menu bar ----

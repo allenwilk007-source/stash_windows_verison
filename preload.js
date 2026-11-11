@@ -1,10 +1,11 @@
-// Safe bridge between the Stash pages and the Mac app.
+// Safe bridge between the Stash pages and the desktop app.
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('stashNative', {
   // main window
   load: () => ipcRenderer.invoke('store:load'),
   save: json => ipcRenderer.send('store:save', json),
+  saveNow: json => ipcRenderer.sendSync('store:save-now', json),   // blocking: used only while closing
   status: (msg, attention) => ipcRenderer.send('status', msg, !!attention),
   onIntake: cb => ipcRenderer.on('intake', (e, files) => cb(files)),
   onQuickNote: cb => ipcRenderer.on('quick-note', (e, text) => cb(text)),
@@ -39,6 +40,15 @@ contextBridge.exposeInMainWorld('stashNative', {
   aiAsk: q => ipcRenderer.invoke('ai:ask', q),
   aiSetKey: (key, model) => ipcRenderer.invoke('ai:setKey', key, model),
   aiCreds: () => ipcRenderer.invoke('ai:creds'),
+  // Claude requests go through the app, which adds the saved key (the page never sees it)
+  claude: body => ipcRenderer.invoke('ai:claude', body),
+  claudeStream: async (body, onText) => {
+    const id = Math.random().toString(36).slice(2);
+    const fn = (e, rid, text) => { if (rid === id) onText(text); };
+    ipcRenderer.on('ai:claude-delta', fn);
+    try { return await ipcRenderer.invoke('ai:claude-stream', id, body); }
+    finally { ipcRenderer.removeListener('ai:claude-delta', fn); }
+  },
   onAICreds: cb => ipcRenderer.on('ai-creds', (e, c) => cb(c)),
   aiStatus: () => ipcRenderer.invoke('ai:status'),
   authListen: () => ipcRenderer.invoke('auth:listen'),
