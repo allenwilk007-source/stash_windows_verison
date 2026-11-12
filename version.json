@@ -1,6 +1,6 @@
 {
-  "version": "1.11.0",
-  "notes": "People: search, follow and profiles. Invites now need accepting, plus a notification bell.",
+  "version": "1.12.0",
+  "notes": "Light mode: switch between light and dark from the top bar or your Account page",
   "files": [
     "index.html",
     "notes.js",

@@ -3,7 +3,7 @@
 // • Menu-bar icon: click for the quick panel (drop files, quick note, ask, recent);
 //   drag files straight onto the icon to have Smart Sort file them.
 // • Everything is saved to ~/Library/Application Support/Stash/stash-data.json.
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell, globalShortcut, Notification, net, screen, session, systemPreferences } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell, globalShortcut, Notification, net, screen, session, systemPreferences, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -280,6 +280,8 @@ else{h.textContent="That link didn't work";p.textContent=er||'It may have expire
   // ---- uploaded videos/docs live as real files on disk ----
   const filesDir = () => { const d = path.join(app.getPath('userData'), 'files'); fs.mkdirSync(d, { recursive: true }); return d; };
   const destFor = name => path.join(filesDir(), Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + '-' + String(name || 'file').replace(/[^\w.\- ]+/g, '_').slice(-80));
+  // light / dark: keep the window chrome and background in step with the app's theme
+  ipcMain.on('theme:set', (e, t) => { try { if (win && !win.isDestroyed()) win.setBackgroundColor(t === 'light' ? '#f4f4f6' : '#141416'); } catch (err) {} });
   ipcMain.handle('pdf:save', async (e, name) => {
     const w = BrowserWindow.fromWebContents(e.sender);
     const { canceled, filePath } = await dialog.showSaveDialog(w, { defaultPath: path.join(app.getPath('documents'), String(name || 'Note').replace(/[\/:*?"<>|]+/g, '-').slice(0, 80) + '.pdf'), filters: [{ name: 'PDF', extensions: ['pdf'] }] });
