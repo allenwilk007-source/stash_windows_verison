@@ -360,7 +360,15 @@ else{h.textContent="That link didn't work";p.textContent=er||'It may have expire
   const filesDir = () => { const d = path.join(app.getPath('userData'), 'files'); fs.mkdirSync(d, { recursive: true }); return d; };
   const destFor = name => path.join(filesDir(), Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + '-' + String(name || 'file').replace(/[^\w.\- ]+/g, '_').slice(-80));
   // light / dark: keep the window chrome and background in step with the app's theme
-  ipcMain.on('theme:set', (e, t) => { try { if (win && !win.isDestroyed()) win.setBackgroundColor(t === 'light' ? '#f4f4f6' : '#141416'); } catch (err) {} });
+  ipcMain.on('theme:set', (e, t) => {
+    try {
+      if (!win || win.isDestroyed()) return;
+      const light = t === 'light';
+      win.setBackgroundColor(light ? '#f4f4f6' : '#141416');
+      // Windows: the minimise / maximise / close buttons are drawn by Windows over the toolbar, so recolour them too
+      if (!IS_MAC && win.setTitleBarOverlay) win.setTitleBarOverlay({ color: light ? '#f4f4f6' : '#141416', symbolColor: light ? '#2a2a30' : '#d8d8dc' });
+    } catch (err) {}
+  });
   ipcMain.handle('pdf:save', async (e, name) => {
     const w = BrowserWindow.fromWebContents(e.sender);
     const { canceled, filePath } = await dialog.showSaveDialog(w, { defaultPath: path.join(app.getPath('documents'), String(name || 'Note').replace(/[\/:*?"<>|]+/g, '-').slice(0, 80) + '.pdf'), filters: [{ name: 'PDF', extensions: ['pdf'] }] });
